@@ -33,13 +33,16 @@ async function generate(startTime, endTime, fps, res) {
     return new Date(y, mo - 1, d, h, mi, s, ms).getTime();
   }
 
+  const SPEED   = 1.0; // playback speed multiplier (>1 = faster)
+  const OUT_FPS  = 25;   // output framerate — higher = smoother (more frame duplication)
   const defaultDuration = 1 / fps;
   const lines = [];
   for (let i = 0; i < frames.length; i++) {
     const absPath = path.resolve(frames[i]).replace(/\\/g, '/');
-    const duration = i < frames.length - 1
+    const rawDuration = i < frames.length - 1
       ? (parseFrameMs(frames[i + 1]) - parseFrameMs(frames[i])) / 1000
       : defaultDuration;
+    const duration = rawDuration / SPEED;
     lines.push(`file '${absPath}'`);
     lines.push(`duration ${duration.toFixed(6)}`);
   }
@@ -64,7 +67,7 @@ async function generate(startTime, endTime, fps, res) {
     '-i',       tmpList,
     '-c:v',     'libx264',
     '-pix_fmt', 'yuv420p',
-    '-r',       String(fps),  // constant output fps — duplicates frames to fill gaps
+    '-r',       String(OUT_FPS), // constant output fps — duplicates frames to fill gaps
     '-y',
     tmpOut,
   ], { stdio: ['ignore', 'ignore', 'pipe'] });

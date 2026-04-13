@@ -6,9 +6,9 @@
 const DETECTION_SKIP = 10;
 
 // Frame save: write to disk once every N frames for clip generation.
-// At 10fps, FRAME_SAVE_SKIP=3 saves ~3fps — produces watchable clips while
-// cutting disk I/O and GC pressure by 70%.
-const FRAME_SAVE_SKIP = 3;
+// At 10fps, FRAME_SAVE_SKIP=1 saves all frames — smooth clips matching live view.
+// Increase this (e.g. 2 = 5fps) to reduce disk usage at the cost of smoothness.
+const FRAME_SAVE_SKIP = 1;
 
 const MIN_CONFIDENCE = 0.5;
 

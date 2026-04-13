@@ -52,7 +52,7 @@ class CameraCapture extends EventEmitter {
       '-r',        String(fps),
       '-f',        'image2pipe',
       '-vcodec',   'mjpeg',
-      '-q:v',      '5',       // JPEG quality (lower = better, 1-31)
+      '-q:v',      '3',       // JPEG quality (lower = better, 1-31)
       'pipe:1',
     ];
 
