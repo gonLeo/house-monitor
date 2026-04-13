@@ -62,9 +62,9 @@ async function generate(startTime, endTime, fps, res) {
     '-f',       'concat',
     '-safe',    '0',
     '-i',       tmpList,
-    '-vsync',   'vfr',          // variable frame rate — honors the duration entries
     '-c:v',     'libx264',
     '-pix_fmt', 'yuv420p',
+    '-r',       String(fps),  // constant output fps — duplicates frames to fill gaps
     '-y',
     tmpOut,
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
