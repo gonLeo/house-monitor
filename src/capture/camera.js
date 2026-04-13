@@ -44,13 +44,15 @@ class CameraCapture extends EventEmitter {
 
     const args = [
       '-f',        'dshow',
-      '-video_size', `${width}x${height}`,
-      '-framerate', String(fps),
       '-i',        `video=${device}`,
+      // Scale to target resolution and resample to target fps as output filters
+      // (avoids dshow "Could not set video options" when the device doesn't
+      //  natively support the requested capture parameters)
+      '-vf',       `scale=${width}:${height}`,
+      '-r',        String(fps),
       '-f',        'image2pipe',
       '-vcodec',   'mjpeg',
       '-q:v',      '5',       // JPEG quality (lower = better, 1-31)
-      '-r',        String(fps),
       'pipe:1',
     ];
 
