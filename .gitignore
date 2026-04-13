@@ -1,0 +1,7 @@
+node_modules/
+.env
+frames/
+snapshots/
+*.log
+npm-debug.log*
+.DS_Store

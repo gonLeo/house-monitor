@@ -1,0 +1,23 @@
+{
+  "name": "house-monitor",
+  "version": "1.0.0",
+  "description": "Local resilient video surveillance system with offline-first storage",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.3",
+    "@tensorflow/tfjs": "^4.17.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jimp": "^0.22.12",
+    "node-cron": "^3.0.3",
+    "pg": "^8.11.5",
+    "ws": "^8.17.0"
+  }
+}
