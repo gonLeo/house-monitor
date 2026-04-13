@@ -23,9 +23,27 @@ async function generate(startTime, endTime, fps, res) {
     return;
   }
 
-  const listContent = frames
-    .map((f) => `file '${path.resolve(f).replace(/\\/g, '/')}'`)
-    .join('\n');
+  // Parse each frame's actual timestamp from the path (YYYY-MM-DD/HH-MM-SS-mmm.jpg)
+  // and compute real inter-frame durations so the video plays at 1x speed.
+  function parseFrameMs(framePath) {
+    const dateDir  = path.basename(path.dirname(framePath));   // "2026-04-13"
+    const fileName = path.basename(framePath, '.jpg');          // "15-04-50-657"
+    const [y, mo, d]     = dateDir.split('-').map(Number);
+    const [h, mi, s, ms] = fileName.split('-').map(Number);
+    return new Date(y, mo - 1, d, h, mi, s, ms).getTime();
+  }
+
+  const defaultDuration = 1 / fps;
+  const lines = [];
+  for (let i = 0; i < frames.length; i++) {
+    const absPath = path.resolve(frames[i]).replace(/\\/g, '/');
+    const duration = i < frames.length - 1
+      ? (parseFrameMs(frames[i + 1]) - parseFrameMs(frames[i])) / 1000
+      : defaultDuration;
+    lines.push(`file '${absPath}'`);
+    lines.push(`duration ${duration.toFixed(6)}`);
+  }
+  const listContent = lines.join('\n');
 
   const ts      = Date.now();
   const tmpList = path.join(os.tmpdir(), `hm-list-${ts}.txt`);
@@ -41,10 +59,10 @@ async function generate(startTime, endTime, fps, res) {
   let aborted = false;
 
   const proc = spawn('ffmpeg', [
-    '-r',       String(fps),
     '-f',       'concat',
     '-safe',    '0',
     '-i',       tmpList,
+    '-vsync',   'vfr',          // variable frame rate — honors the duration entries
     '-c:v',     'libx264',
     '-pix_fmt', 'yuv420p',
     '-y',
