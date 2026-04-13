@@ -1,8 +1,15 @@
 'use strict';
 
-// Run detection on every Nth frame to avoid blocking the stream.
-// At 10fps, DETECTION_SKIP=3 means detection runs ~3x/sec max.
-const DETECTION_SKIP = 3;
+// Detection: run inference once every N frames.
+// At 10fps, DETECTION_SKIP=10 = ~1 detection/sec — enough to catch persons
+// without queuing up work in the worker thread.
+const DETECTION_SKIP = 10;
+
+// Frame save: write to disk once every N frames for clip generation.
+// At 10fps, FRAME_SAVE_SKIP=3 saves ~3fps — produces watchable clips while
+// cutting disk I/O and GC pressure by 70%.
+const FRAME_SAVE_SKIP = 3;
+
 const MIN_CONFIDENCE = 0.5;
 
 let _frameCounter = 0;
@@ -29,10 +36,12 @@ function start({ camera, wsServer, detector, cooldown, db, storage }) {
     // 1. Broadcast to all live-view clients
     wsServer.broadcastFrame(buffer.toString('base64'));
 
-    // 2. Save frame to disk for clip generation (non-blocking)
-    storage.saveFrame(buffer, new Date()).catch((err) => {
-      console.warn('[Pipeline] Frame save failed:', err.message);
-    });
+    // 2. Save frame to disk for clip generation (throttled to FRAME_SAVE_SKIP)
+    if (_frameCounter % FRAME_SAVE_SKIP === 0) {
+      storage.saveFrame(buffer, new Date()).catch((err) => {
+        console.warn('[Pipeline] Frame save failed:', err.message);
+      });
+    }
 
     // 3. Run detection (skip frames while a detection is already running)
     if (_frameCounter % DETECTION_SKIP !== 0 || _isDetecting) return;

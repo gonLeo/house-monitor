@@ -34,8 +34,8 @@ async function main() {
   // 2. Apply schema migrations (idempotent)
   await runMigrations();
 
-  // 3. Load COCO-SSD detection model
-  console.log('[App] Loading COCO-SSD model (first run downloads ~10 MB)…');
+  // 3. Load COCO-SSD detection model (runs in a Worker Thread)
+  console.log('[App] Loading COCO-SSD model in worker thread…');
   await detector.load();
 
   // 4. Create HTTP server + Express app
