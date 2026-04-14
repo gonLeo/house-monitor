@@ -2,10 +2,13 @@
 
 require('dotenv').config();
 
+const config = require('./config');
+const logger = require('./logger');
+logger.init(config.logsDir); // intercepts console.log/warn/error → logs/app.log
+
 const http = require('http');
 const fs   = require('fs');
 
-const config       = require('./config');
 const { waitForConnection } = require('./db/connection');
 const { runMigrations }     = require('./db/migrations');
 const db           = require('./db/queries');

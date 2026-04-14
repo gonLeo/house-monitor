@@ -30,4 +30,5 @@ module.exports = {
   snapshotsDir:         process.env.SNAPSHOTS_DIR                   || './snapshots',
   audioDir:             process.env.AUDIO_DIR                       || './audio',
   frameRetentionHours:  parseInt(process.env.FRAME_RETENTION_HOURS  || '48', 10),
+  logsDir:              process.env.LOGS_DIR                        || './logs',
 };

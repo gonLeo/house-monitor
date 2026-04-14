@@ -312,6 +312,20 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
+    /* ── Logs button ─────────────────────────────────────────────── */
+    .btn-logs {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      white-space: nowrap;
+      transition: border-color .15s, color .15s;
+    }
+    .btn-logs:hover { border-color: var(--accent); color: var(--accent); }
+
     /* ── Ver Clipe button ────────────────────────────────────────── */
     .btn-clip {
       background: transparent;
@@ -397,6 +411,7 @@
         <span class="slider"></span>
       </div>
     </label>
+    <a href="/api/logs" target="_blank" class="btn-logs" title="Ver logs da aplicação">📋 Logs</a>
   </header>
 
   <!-- Main grid -->

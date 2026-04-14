@@ -1,5 +1,6 @@
 'use strict';
 
+const fs    = require('fs');
 const path  = require('path');
 const clips = require('./clips');
 const config = require('../config');
@@ -75,6 +76,18 @@ function setup(app, db, connectivity, camera) {
         res.status(500).json({ error: 'Failed to generate clip' });
       }
     }
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/logs  — returns the application log file as plain text
+  // ------------------------------------------------------------------
+  app.get('/api/logs', (req, res) => {
+    const filePath = path.resolve(process.cwd(), config.logsDir, 'app.log');
+    if (!fs.existsSync(filePath)) {
+      return res.type('text/plain; charset=utf-8').send('Nenhum log disponível ainda.');
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    fs.createReadStream(filePath).pipe(res);
   });
 }
 

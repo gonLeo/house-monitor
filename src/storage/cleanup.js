@@ -10,6 +10,7 @@ function start() {
   cron.schedule('0 * * * *', () => {
     cleanOldFrames();
     cleanOldAudio();
+    cleanOldLogs();
   });
   console.log(
     `[Cleanup] Scheduled hourly frame cleanup (retention: ${config.frameRetentionHours}h).`
@@ -93,6 +94,31 @@ function cleanOldAudio() {
   if (deletedCount > 0) {
     console.log(`[Cleanup] Deleted ${deletedCount} old audio segment(s).`);
   }
+}
+
+function cleanOldLogs() {
+  const logsDir = config.logsDir;
+  if (!logsDir) return;
+
+  const filePath = path.join(logsDir, 'app.log');
+  if (!fs.existsSync(filePath)) return;
+
+  const cutoff = new Date(Date.now() - config.frameRetentionHours * 3600 * 1000);
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines   = content.split('\n');
+    const kept    = lines.filter(line => {
+      // Lines written by logger.js start with [ISO_TIMESTAMP]
+      const m = line.match(/^\[(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\]/);
+      if (!m) return true; // keep lines without recognisable timestamp
+      return new Date(m[1]) >= cutoff;
+    });
+    if (kept.length < lines.length) {
+      fs.writeFileSync(filePath, kept.join('\n'), 'utf8');
+      console.log(`[Cleanup] Trimmed ${lines.length - kept.length} old log line(s).`);
+    }
+  } catch { /* ignore */ }
 }
 
 module.exports = { start };
