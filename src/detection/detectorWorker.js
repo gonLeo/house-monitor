@@ -4,14 +4,14 @@
 // completely off the main event loop so frame streaming stays fluid.
 
 const { parentPort } = require('worker_threads');
-const tf      = require('@tensorflow/tfjs');
+const tf      = require('@tensorflow/tfjs-node'); // native C++ backend — ~10x faster than pure-JS
 const cocoSsd = require('@tensorflow-models/coco-ssd');
 const Jimp    = require('jimp');
 
 let model = null;
 
 async function init() {
-  await tf.setBackend('cpu');
+  // tfjs-node registers its own backend automatically — no setBackend needed.
   await tf.ready();
   model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
 

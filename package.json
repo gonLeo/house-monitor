@@ -3,16 +3,15 @@
   "version": "1.0.0",
   "description": "Local resilient video surveillance system with offline-first storage",
   "main": "src/index.js",
-  "scripts": {
-    "start": "node src/index.js",
-    "dev":   "node --watch src/index.js"
+  "scripts": {    "postinstall": "node -e \"const f=require('fs'),p=require('path');const s=p.join('node_modules','@tensorflow','tfjs-node','deps','lib','tensorflow.dll');const d=p.join('node_modules','@tensorflow','tfjs-node','lib','napi-v8','tensorflow.dll');if(f.existsSync(s)&&!f.existsSync(d)){f.copyFileSync(s,d);console.log('[postinstall] tensorflow.dll copiado')}\"",    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
     "@tensorflow-models/coco-ssd": "^2.2.3",
-    "@tensorflow/tfjs": "^4.17.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jimp": "^0.22.12",
