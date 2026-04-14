@@ -43,20 +43,17 @@ class CameraCapture extends EventEmitter {
     const { device, width, height, fps } = config.camera;
 
     const args = [
-      '-f',        'dshow',
-      '-i',        `video=${device}`,
-      // Scale to target resolution and resample to target fps as output filters
-      // (avoids dshow "Could not set video options" when the device doesn't
-      //  natively support the requested capture parameters)
-      '-vf',       `scale=${width}:${height}`,
-      '-r',        String(fps),
-      '-f',        'image2pipe',
-      '-vcodec',   'mjpeg',
-      '-q:v',      '3',       // JPEG quality (lower = better, 1-31)
+      '-f',          'dshow',
+      '-vcodec',     'mjpeg',           // tell dshow to use camera's native MJPEG stream
+      '-video_size', `${width}x${height}`,
+      '-framerate',  String(fps),
+      '-i',          `video=${device}`,
+      '-f',          'image2pipe',
+      '-vcodec',     'copy',            // pass MJPEG frames through without re-encoding
       'pipe:1',
     ];
 
-    console.log(`[Camera] Starting capture: device="${device}" ${width}x${height} @ ${fps}fps`);
+    console.log(`[Camera] Starting capture: device="${device}" ${width}x${height} @ ${fps}fps (native MJPEG, no re-encode)`);
     this._process = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
     this._process.stdout.on('data', (chunk) => this._parseChunk(chunk));

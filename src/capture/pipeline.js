@@ -1,14 +1,13 @@
 'use strict';
 
 // Detection: run inference once every N frames.
-// At 10fps, DETECTION_SKIP=5 = attempt every 500ms. With tfjs-node the
-// inference itself takes ~200-500ms, so effective latency is ~1s worst case.
-const DETECTION_SKIP = 5;
+// At 30fps, DETECTION_SKIP=15 = ~2 attempts/sec. Gated by _isDetecting so
+// inference pile-up is impossible regardless of fps.
+const DETECTION_SKIP = 15;
 
 // Frame save: write to disk once every N frames for clip generation.
-// At 10fps, FRAME_SAVE_SKIP=1 saves all frames — smooth clips matching live view.
-// Increase this (e.g. 2 = 5fps) to reduce disk usage at the cost of smoothness.
-const FRAME_SAVE_SKIP = 1;
+// At 30fps, FRAME_SAVE_SKIP=3 saves ~10fps — smooth clips, manageable disk I/O.
+const FRAME_SAVE_SKIP = 3;
 
 const MIN_CONFIDENCE = 0.5;
 
