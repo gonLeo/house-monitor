@@ -4,10 +4,12 @@ const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
 const { spawn } = require('child_process');
+const config   = require('../config');
 const storage  = require('../storage/files');
 
 /**
- * Generate an MP4 clip from saved frames within a time range and stream it to res.
+ * Generate an MP4 clip from saved frames (+ audio if available) within a time
+ * range and stream it to res.
  * Encodes to a temp file first — libx264 does not write reliably to pipe:1 on Windows.
  *
  * @param {string|Date} startTime
@@ -36,41 +38,68 @@ async function generate(startTime, endTime, fps, res) {
   const SPEED   = 1.0; // playback speed multiplier (>1 = faster)
   const OUT_FPS  = 25;   // output framerate — higher = smoother (more frame duplication)
   const defaultDuration = 1 / fps;
-  const lines = [];
+  const videoLines = [];
   for (let i = 0; i < frames.length; i++) {
     const absPath = path.resolve(frames[i]).replace(/\\/g, '/');
     const rawDuration = i < frames.length - 1
       ? (parseFrameMs(frames[i + 1]) - parseFrameMs(frames[i])) / 1000
       : defaultDuration;
     const duration = rawDuration / SPEED;
-    lines.push(`file '${absPath}'`);
-    lines.push(`duration ${duration.toFixed(6)}`);
+    videoLines.push(`file '${absPath}'`);
+    videoLines.push(`duration ${duration.toFixed(6)}`);
   }
-  const listContent = lines.join('\n');
 
-  const ts      = Date.now();
-  const tmpList = path.join(os.tmpdir(), `hm-list-${ts}.txt`);
-  const tmpOut  = path.join(os.tmpdir(), `hm-clip-${ts}.mp4`);
+  // Build audio concat list if segments are available
+  const clipStart      = new Date(startTime);
+  const clipEnd        = new Date(endTime);
+  const audioSegments  = storage.getAudioSegmentsInRange(startTime, endTime);
+  const hasAudio       = audioSegments.length > 0;
+  const audioLines     = [];
+  if (hasAudio) {
+    const segSeconds = config.audio.segmentSeconds;
+    for (const seg of audioSegments) {
+      const absPath  = path.resolve(seg.filePath).replace(/\\/g, '/');
+      const inpoint  = Math.max(0, (clipStart.getTime() - seg.segStart.getTime()) / 1000);
+      const outpoint = Math.min(segSeconds, (clipEnd.getTime() - seg.segStart.getTime()) / 1000);
+      audioLines.push(`file '${absPath}'`);
+      if (inpoint > 0.01) audioLines.push(`inpoint ${inpoint.toFixed(3)}`);
+      audioLines.push(`outpoint ${outpoint.toFixed(3)}`);
+    }
+  }
 
-  fs.writeFileSync(tmpList, listContent, 'utf8');
+  const ts           = Date.now();
+  const tmpVideoList = path.join(os.tmpdir(), `hm-vlist-${ts}.txt`);
+  const tmpAudioList = hasAudio ? path.join(os.tmpdir(), `hm-alist-${ts}.txt`) : null;
+  const tmpOut       = path.join(os.tmpdir(), `hm-clip-${ts}.mp4`);
+
+  fs.writeFileSync(tmpVideoList, videoLines.join('\n'), 'utf8');
+  if (hasAudio) fs.writeFileSync(tmpAudioList, audioLines.join('\n'), 'utf8');
 
   const cleanup = () => {
-    try { fs.unlinkSync(tmpList); } catch { /* ignore */ }
-    try { fs.unlinkSync(tmpOut);  } catch { /* ignore */ }
+    try { fs.unlinkSync(tmpVideoList); } catch { /* ignore */ }
+    if (tmpAudioList) try { fs.unlinkSync(tmpAudioList); } catch { /* ignore */ }
+    try { fs.unlinkSync(tmpOut);      } catch { /* ignore */ }
   };
 
   let aborted = false;
 
-  const proc = spawn('ffmpeg', [
-    '-f',       'concat',
-    '-safe',    '0',
-    '-i',       tmpList,
-    '-c:v',     'libx264',
+  const args = [
+    '-f', 'concat', '-safe', '0', '-i', tmpVideoList,
+  ];
+  if (hasAudio) {
+    args.push('-f', 'concat', '-safe', '0', '-i', tmpAudioList);
+  }
+  args.push(
+    '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
-    '-r',       String(OUT_FPS), // constant output fps — duplicates frames to fill gaps
-    '-y',
-    tmpOut,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    '-r', String(OUT_FPS),
+  );
+  if (hasAudio) {
+    args.push('-c:a', 'aac', '-b:a', '64k');
+  }
+  args.push('-y', tmpOut);
+
+  const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
 
   let stderr = '';
   proc.stderr.on('data', (d) => { stderr += d.toString(); });

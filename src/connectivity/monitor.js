@@ -4,7 +4,7 @@ const dns = require('dns');
 const { promisify } = require('util');
 
 const dnsResolve = promisify(dns.resolve);
-const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const CHECK_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
 
 class ConnectivityMonitor {
   constructor() {
@@ -17,7 +17,7 @@ class ConnectivityMonitor {
     this._db = db;
     this._check(); // immediate first check
     this._timer = setInterval(() => this._check(), CHECK_INTERVAL_MS);
-    console.log('[Connectivity] Monitor started (interval: 5 min).');
+    console.log('[Connectivity] Monitor started (interval: 1 min).');
   }
 
   stop() {

@@ -7,7 +7,10 @@ const config = require('../config');
 
 function start() {
   // Run every hour at minute 0
-  cron.schedule('0 * * * *', cleanOldFrames);
+  cron.schedule('0 * * * *', () => {
+    cleanOldFrames();
+    cleanOldAudio();
+  });
   console.log(
     `[Cleanup] Scheduled hourly frame cleanup (retention: ${config.frameRetentionHours}h).`
   );
@@ -52,6 +55,43 @@ function cleanOldFrames() {
 
   if (deletedCount > 0) {
     console.log(`[Cleanup] Deleted ${deletedCount} old frame(s).`);
+  }
+}
+
+function cleanOldAudio() {
+  const audioDir = config.audioDir;
+  if (!audioDir || !fs.existsSync(audioDir)) return;
+
+  const cutoff = new Date(Date.now() - config.frameRetentionHours * 3600 * 1000);
+  let deletedCount = 0;
+
+  for (const dateDir of fs.readdirSync(audioDir)) {
+    const dirPath = path.join(audioDir, dateDir);
+    if (!fs.statSync(dirPath).isDirectory()) continue;
+
+    const dirEnd = new Date(dateDir + 'T23:59:59.999');
+    if (dirEnd < cutoff) {
+      for (const file of fs.readdirSync(dirPath)) {
+        try { fs.unlinkSync(path.join(dirPath, file)); deletedCount++; } catch { /* ignore */ }
+      }
+      try { fs.rmdirSync(dirPath); } catch { /* ignore */ }
+      continue;
+    }
+
+    for (const fileName of fs.readdirSync(dirPath)) {
+      if (!fileName.endsWith('.m4a')) continue;
+      const [y, mo, d] = dateDir.split('-').map(Number);
+      const [h, mi, s] = fileName.replace('.m4a', '').split('-').map(Number);
+      const fileDate = new Date(y, mo - 1, d, h, mi, s, 0);
+      if (isNaN(fileDate.getTime())) continue;
+      if (fileDate < cutoff) {
+        try { fs.unlinkSync(path.join(dirPath, fileName)); deletedCount++; } catch { /* ignore */ }
+      }
+    }
+  }
+
+  if (deletedCount > 0) {
+    console.log(`[Cleanup] Deleted ${deletedCount} old audio segment(s).`);
   }
 }
 

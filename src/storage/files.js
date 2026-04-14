@@ -99,4 +99,60 @@ async function getFramesInRange(startTime, endTime) {
   return files;
 }
 
-module.exports = { saveFrame, saveSnapshot, getFramesInRange };
+/**
+ * Parse a segment start Date from the audio directory structure.
+ * dateDir  : "YYYY-MM-DD"
+ * fileName : "HH-MM-SS.m4a"
+ */
+function parseSegmentStart(dateDir, fileName) {
+  try {
+    const [y, mo, d] = dateDir.split('-').map(Number);
+    const [h, mi, s] = fileName.replace('.m4a', '').split('-').map(Number);
+    return new Date(y, mo - 1, d, h, mi, s, 0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return audio segments (m4a files) whose time range overlaps [startTime, endTime].
+ * Each entry: { filePath: string, segStart: Date, segEnd: Date }
+ */
+function getAudioSegmentsInRange(startTime, endTime) {
+  const start      = new Date(startTime);
+  const end        = new Date(endTime);
+  const audioDir   = config.audioDir;
+  const segSeconds = config.audio.segmentSeconds;
+
+  if (!fs.existsSync(audioDir)) return [];
+
+  const dateDirs = fs.readdirSync(audioDir).sort();
+  const segments = [];
+
+  const now = new Date();
+
+  for (const dateDir of dateDirs) {
+    const dirPath = path.join(audioDir, dateDir);
+    if (!fs.statSync(dirPath).isDirectory()) continue;
+
+    const dirStart = new Date(dateDir + 'T00:00:00');
+    const dirEnd   = new Date(dateDir + 'T23:59:59.999');
+    if (dirEnd < start || dirStart > end) continue;
+
+    for (const fileName of fs.readdirSync(dirPath).sort()) {
+      if (!fileName.endsWith('.m4a')) continue;
+      const segStart = parseSegmentStart(dateDir, fileName);
+      if (!segStart) continue;
+      const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
+      // Skip segments still being recorded — moov atom not written until ffmpeg closes the file
+      if (segEnd > now) continue;
+      if (segEnd > start && segStart < end) {
+        segments.push({ filePath: path.join(dirPath, fileName), segStart, segEnd });
+      }
+    }
+  }
+
+  return segments;
+}
+
+module.exports = { saveFrame, saveSnapshot, getFramesInRange, getAudioSegmentsInRange };

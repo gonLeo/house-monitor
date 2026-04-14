@@ -17,6 +17,7 @@ const WsServer      = require('./streaming/wsServer');
 const ConnectivityMonitor = require('./connectivity/monitor');
 const storage       = require('./storage/files');
 const cleanup       = require('./storage/cleanup');
+const AudioRecorder = require('./capture/audioRecorder');
 const { createServer } = require('./api/server');
 
 async function main() {
@@ -27,6 +28,7 @@ async function main() {
   // Ensure storage directories exist
   fs.mkdirSync(config.framesDir,    { recursive: true });
   fs.mkdirSync(config.snapshotsDir, { recursive: true });
+  fs.mkdirSync(config.audioDir,     { recursive: true });
 
   // 1. Connect to database (waits for Docker PostgreSQL to be ready)
   await waitForConnection();
@@ -39,9 +41,10 @@ async function main() {
   await detector.load();
 
   // 4. Create HTTP server + Express app
-  const camera       = new CameraCapture();
-  const cooldown     = new CooldownTimer(config.cooldownSeconds * 1000);
-  const connectivity = new ConnectivityMonitor();
+  const camera         = new CameraCapture();
+  const audioRecorder  = new AudioRecorder();
+  const cooldown       = new CooldownTimer(config.cooldownSeconds * 1000);
+  const connectivity   = new ConnectivityMonitor();
 
   const app        = createServer(db, connectivity, camera);
   const httpServer = http.createServer(app);
@@ -56,6 +59,7 @@ async function main() {
   // 7. Wire camera → pipeline
   pipeline.start({ camera, wsServer, detector, cooldown, db, storage });
   camera.start();
+  audioRecorder.start();
 
   // 8. Start HTTP server
   httpServer.listen(config.port, () => {
@@ -70,6 +74,7 @@ async function main() {
   async function shutdown(signal) {
     console.log(`\n[App] ${signal} received. Shutting down…`);
     camera.stop();
+    audioRecorder.stop();
     connectivity.stop();
     httpServer.close(async () => {
       const { pool } = require('./db/connection');
