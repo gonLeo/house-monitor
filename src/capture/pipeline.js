@@ -1,8 +1,9 @@
 'use strict';
 
 // Detection: run inference once every N frames.
-// At 10fps, DETECTION_SKIP=10 = ~1 detection/sec — enough to catch persons
-// without queuing up work in the worker thread.
+// At 10fps, DETECTION_SKIP=10 = ~1 attempt/sec. The effective rate is bounded
+// by inference time (~1-2s after warmup), so increasing this wastes CPU without
+// reducing latency.
 const DETECTION_SKIP = 10;
 
 // Frame save: write to disk once every N frames for clip generation.
@@ -11,6 +12,8 @@ const DETECTION_SKIP = 10;
 const FRAME_SAVE_SKIP = 1;
 
 const MIN_CONFIDENCE = 0.5;
+
+const alarm = require('../alarm');
 
 let _frameCounter = 0;
 let _isDetecting  = false;
@@ -69,6 +72,8 @@ function start({ camera, wsServer, detector, cooldown, db, storage }) {
         console.log(
           `[Detection] Person detected! confidence=${(person.score * 100).toFixed(1)}% id=${event.id}`
         );
+
+        alarm.play();
 
         wsServer.broadcast({
           type: 'detection',

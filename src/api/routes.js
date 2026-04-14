@@ -1,9 +1,10 @@
 'use strict';
 
-const fs    = require('fs');
-const path  = require('path');
-const clips = require('./clips');
+const fs     = require('fs');
+const path   = require('path');
+const clips  = require('./clips');
 const config = require('../config');
+const alarm  = require('../alarm');
 
 function setup(app, db, connectivity, camera) {
 
@@ -76,6 +77,23 @@ function setup(app, db, connectivity, camera) {
         res.status(500).json({ error: 'Failed to generate clip' });
       }
     }
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/alarm  — returns alarm enabled state
+  // POST /api/alarm  — sets alarm enabled state { enabled: true/false }
+  // ------------------------------------------------------------------
+  app.get('/api/alarm', (req, res) => {
+    res.json({ enabled: alarm.isEnabled() });
+  });
+
+  app.post('/api/alarm', (req, res) => {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'Body must be { "enabled": true|false }' });
+    }
+    alarm.setEnabled(enabled);
+    res.json({ enabled: alarm.isEnabled() });
   });
 
   // ------------------------------------------------------------------

@@ -53,28 +53,33 @@ function handleFps(value) {
 
 // ── Alarm feature flag ────────────────────────────────────────
 const alarmToggle = document.getElementById('alarm-enabled');
-alarmToggle.addEventListener('change', () => {
-  localStorage.setItem('alarmEnabled', alarmToggle.checked ? '1' : '0');
+
+async function fetchAlarmState() {
+  try {
+    const res = await fetch('/api/alarm');
+    const { enabled } = await res.json();
+    alarmToggle.checked = enabled;
+  } catch {}
+}
+
+alarmToggle.addEventListener('change', async () => {
+  try {
+    await fetch('/api/alarm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: alarmToggle.checked }),
+    });
+  } catch {}
 });
-if (localStorage.getItem('alarmEnabled') === '0') alarmToggle.checked = false;
 
 // ── Detection notification ────────────────────────────────────
 let flashTimer = null;
-
-function playAlarmTimes(remaining) {
-  if (remaining <= 0) return;
-  const a = new Audio('/alarm.mp3');
-  a.play().catch(() => {});
-  a.onended = () => playAlarmTimes(remaining - 1);
-}
 
 function handleDetection(event) {
   const flash = document.getElementById('detection-flash');
   flash.style.display = 'block';
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { flash.style.display = 'none'; }, 4000);
-
-  if (alarmToggle.checked) playAlarmTimes(2);
 
   prependEventCard(event);
   updateEventsCount(1);
@@ -297,6 +302,7 @@ function buildClipLink() {
 connectWs();
 loadEvents();
 loadConnectivity();
+fetchAlarmState();
 
 setInterval(loadConnectivity, 30000);
 setInterval(() => {

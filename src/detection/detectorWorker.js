@@ -14,6 +14,13 @@ async function init() {
   await tf.setBackend('cpu');
   await tf.ready();
   model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+
+  // Warm-up: run one inference on a blank tensor so TF.js JIT-compiles
+  // all operations now rather than on the first real frame.
+  const dummy = tf.zeros([300, 300, 3], 'int32');
+  await model.detect(dummy);
+  dummy.dispose();
+
   parentPort.postMessage({ type: 'ready' });
 }
 
@@ -26,6 +33,9 @@ parentPort.on('message', async ({ id, buffer }) => {
   let predictions = [];
   try {
     const image = await Jimp.read(Buffer.from(buffer));
+    // Resize to 300px wide (model's native input size) — 4× fewer pixels,
+    // dramatically faster pixel loop and TF.js tensor creation.
+    image.resize(300, Jimp.AUTO);
     const { data, width, height } = image.bitmap;
 
     const rgbData = new Uint8Array(width * height * 3);
