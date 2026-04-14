@@ -269,6 +269,44 @@
     .conn-status.offline { color: var(--red); }
     .conn-ts { color: var(--muted); }
 
+    /* ── Alarm toggle switch ─────────────────────────────────────── */
+    .alarm-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .alarm-toggle .switch {
+      position: relative;
+      width: 32px; height: 18px;
+      flex-shrink: 0;
+    }
+    .alarm-toggle .switch input { display: none; }
+    .alarm-toggle .slider {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 18px;
+      transition: background .2s;
+    }
+    .alarm-toggle .slider::before {
+      content: '';
+      position: absolute;
+      width: 12px; height: 12px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform .2s;
+    }
+    .alarm-toggle input:checked + .slider { background: var(--green); }
+    .alarm-toggle input:checked + .slider::before { transform: translateX(14px); }
+
     /* ── Scrollbar ───────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -342,7 +380,7 @@
 
   <!-- Header -->
   <header>
-    <h1>🏠 House Monitor</h1>
+    <h1>House Monitor</h1>
     <div class="status-pill">
       <div class="dot" id="conn-dot"></div>
       <span id="conn-label">verificando…</span>
@@ -352,6 +390,13 @@
       <span id="cam-label">câmera</span>
     </div>
     <div class="fps-badge">FPS: <span id="fps-val">0</span></div>
+    <label class="alarm-toggle" title="Ativar/desativar alarme sonoro">
+      <span>🔔 Alarme</span>
+      <div class="switch">
+        <input type="checkbox" id="alarm-enabled" checked />
+        <span class="slider"></span>
+      </div>
+    </label>
   </header>
 
   <!-- Main grid -->
@@ -512,14 +557,31 @@
       document.getElementById('fps-val').textContent = value;
     }
 
+    // ── Alarm feature flag ────────────────────────────────────────
+    const alarmToggle = document.getElementById('alarm-enabled');
+    alarmToggle.addEventListener('change', () => {
+      localStorage.setItem('alarmEnabled', alarmToggle.checked ? '1' : '0');
+    });
+    // Restore saved preference
+    if (localStorage.getItem('alarmEnabled') === '0') alarmToggle.checked = false;
+
     // ── Detection notification ────────────────────────────────────
     let flashTimer = null;
+
+    function playAlarmTimes(remaining) {
+      if (remaining <= 0) return;
+      const a = new Audio('/alarm.mp3');
+      a.play().catch(() => {});
+      a.onended = () => playAlarmTimes(remaining - 1);
+    }
 
     function handleDetection(event) {
       const flash = document.getElementById('detection-flash');
       flash.style.display = 'block';
       clearTimeout(flashTimer);
       flashTimer = setTimeout(() => { flash.style.display = 'none'; }, 4000);
+
+      if (alarmToggle.checked) playAlarmTimes(4);
 
       // Prepend event to the visible list without a full reload
       prependEventCard(event);
