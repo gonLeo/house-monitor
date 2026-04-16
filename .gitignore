@@ -6,4 +6,3 @@ snapshots/
 npm-debug.log*
 .DS_Store
 audio/
-segments/
