@@ -70,7 +70,7 @@ function setup(app, db, connectivity, camera) {
       return res.status(400).json({ error: 'startTime and endTime query params are required' });
     }
     try {
-      await clips.generate(startTime, endTime, config.camera.fps, res);
+      await clips.generate(startTime, endTime, res);
     } catch (err) {
       console.error('[API] GET /clip:', err.message);
       if (!res.headersSent) {

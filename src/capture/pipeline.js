@@ -5,8 +5,8 @@
 // inference pile-up is impossible regardless of fps.
 const DETECTION_SKIP = 15;
 
-// Frame save: write to disk once every N frames for clip generation.
-// At 30fps, FRAME_SAVE_SKIP=3 saves ~10fps — smooth clips, manageable disk I/O.
+// Frame save: pipe to encoder once every N frames.
+// At 30fps, FRAME_SAVE_SKIP=3 gives 10fps to the H.264 encoder — must match SEGMENT_FPS in .env.
 const FRAME_SAVE_SKIP = 3;
 
 const MIN_CONFIDENCE = 0.5;
@@ -18,18 +18,19 @@ let _isDetecting  = false;
 
 /**
  * Wire camera frames into the full processing pipeline:
- *   capture → stream → save frame → detect → save snapshot → notify
+ *   capture → stream → encode frame → detect → save snapshot → notify
  *
  * @param {{
- *   camera:    import('../capture/camera'),
- *   wsServer:  import('../streaming/wsServer'),
- *   detector:  import('../detection/detector'),
- *   cooldown:  import('../detection/cooldown'),
- *   db:        import('../db/queries'),
- *   storage:   import('../storage/files'),
+ *   camera:          import('../capture/camera'),
+ *   wsServer:        import('../streaming/wsServer'),
+ *   detector:        import('../detection/detector'),
+ *   presenceTracker: import('../detection/presenceTracker'),
+ *   videoRecorder:   import('../capture/videoRecorder'),
+ *   db:              import('../db/queries'),
+ *   storage:         import('../storage/files'),
  * }} opts
  */
-function start({ camera, wsServer, detector, cooldown, db, storage }) {
+function start({ camera, wsServer, detector, presenceTracker, videoRecorder, db, storage }) {
 
   camera.on('frame', async (buffer) => {
     _frameCounter++;
@@ -37,11 +38,9 @@ function start({ camera, wsServer, detector, cooldown, db, storage }) {
     // 1. Broadcast to all live-view clients
     wsServer.broadcastFrame(buffer.toString('base64'));
 
-    // 2. Save frame to disk for clip generation (throttled to FRAME_SAVE_SKIP)
+    // 2. Pipe frame into video encoder (throttled to FRAME_SAVE_SKIP)
     if (_frameCounter % FRAME_SAVE_SKIP === 0) {
-      storage.saveFrame(buffer, new Date()).catch((err) => {
-        console.warn('[Pipeline] Frame save failed:', err.message);
-      });
+      videoRecorder.writeFrame(buffer);
     }
 
     // 3. Run detection (skip frames while a detection is already running)
@@ -54,34 +53,46 @@ function start({ camera, wsServer, detector, cooldown, db, storage }) {
         (p) => p.class === 'person' && p.score >= MIN_CONFIDENCE
       );
 
-      if (person && cooldown.canFire()) {
-        cooldown.reset();
+      if (person) {
+        const result = presenceTracker.personDetected(person.score);
 
-        // Insert event first to get the generated UUID
-        const event = await db.insertEvent({
-          type:       'person_detected',
-          confidence: parseFloat(person.score.toFixed(4)),
-        });
-
-        // Save snapshot and update the event row with its path
-        const snapshotPath = await storage.saveSnapshot(buffer, event.id);
-        await db.updateEventSnapshot(event.id, snapshotPath);
-
-        console.log(
-          `[Detection] Person detected! confidence=${(person.score * 100).toFixed(1)}% id=${event.id}`
-        );
-
-        alarm.play();
-
-        wsServer.broadcast({
-          type: 'detection',
-          event: {
-            id:         event.id,
-            timestamp:  event.timestamp,
-            type:       event.type,
+        if (result.action === 'new_event') {
+          // New presence window — create event, snapshot, alarm, UI notification
+          const event = await db.insertEvent({
+            type:       'person_detected',
             confidence: parseFloat(person.score.toFixed(4)),
-          },
-        });
+          });
+
+          presenceTracker.activate(event.id);
+
+          const snapshotPath = await storage.saveSnapshot(buffer, event.id);
+          await db.updateEventSnapshot(event.id, snapshotPath);
+
+          console.log(
+            `[Detection] Person detected! confidence=${(person.score * 100).toFixed(1)}% id=${event.id}`
+          );
+
+          alarm.play();
+
+          wsServer.broadcast({
+            type: 'detection',
+            event: {
+              id:         event.id,
+              timestamp:  event.timestamp,
+              type:       event.type,
+              confidence: parseFloat(person.score.toFixed(4)),
+            },
+          });
+
+        } else if (result.action === 'extend') {
+          // Ongoing presence — update ended_at in the DB (debounced to every 2s)
+          db.updateEventEndedAt(result.eventId, new Date()).catch((err) => {
+            console.warn('[Pipeline] Failed to update ended_at:', err.message);
+          });
+        }
+
+      } else {
+        presenceTracker.personAbsent();
       }
     } catch (err) {
       console.error('[Pipeline] Error during detection:', err.message);

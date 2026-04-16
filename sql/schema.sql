@@ -8,8 +8,12 @@ CREATE TABLE IF NOT EXISTS events (
   type          VARCHAR(50)   NOT NULL,
   confidence    FLOAT,
   snapshot_path VARCHAR(500),
+  ended_at      TIMESTAMPTZ,
   synced        BOOLEAN       NOT NULL DEFAULT false
 );
+
+-- Idempotent: add ended_at to existing tables that were created before this migration
+ALTER TABLE events ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events (timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_synced    ON events (synced);

@@ -19,6 +19,13 @@ async function updateEventSnapshot(id, snapshotPath) {
   );
 }
 
+async function updateEventEndedAt(id, endedAt) {
+  await pool.query(
+    'UPDATE events SET ended_at = $1 WHERE id = $2',
+    [endedAt, id]
+  );
+}
+
 async function getEvents({ startTime, endTime, synced, type } = {}) {
   const conditions = [];
   const params = [];
@@ -95,6 +102,7 @@ async function getLastEvent() {
 module.exports = {
   insertEvent,
   updateEventSnapshot,
+  updateEventEndedAt,
   getEvents,
   getEventById,
   insertConnectivityLog,

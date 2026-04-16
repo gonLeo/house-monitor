@@ -12,28 +12,10 @@ function getDateString(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function getTimeString(date) {
-  return (
-    `${pad(date.getHours())}-${pad(date.getMinutes())}-` +
-    `${pad(date.getSeconds())}-${String(date.getMilliseconds()).padStart(3, '0')}`
-  );
-}
-
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
   }
-}
-
-/**
- * Save a JPEG frame to frames/<YYYY-MM-DD>/<HH-MM-SS-mmm>.jpg
- * Returns a Promise (non-blocking write).
- */
-function saveFrame(jpegBuffer, date) {
-  const dateDir = path.join(config.framesDir, getDateString(date));
-  ensureDir(dateDir);
-  const filePath = path.join(dateDir, `${getTimeString(date)}.jpg`);
-  return fs.promises.writeFile(filePath, jpegBuffer);
 }
 
 /**
@@ -48,55 +30,60 @@ async function saveSnapshot(jpegBuffer, eventId) {
 }
 
 /**
- * Parse a date from the directory/filename structure used by saveFrame.
+ * Parse a date from the directory/filename structure used by VideoSegmentRecorder.
  * dateDir  : "YYYY-MM-DD"
- * fileName : "HH-MM-SS-mmm.jpg"
+ * fileName : "HH-MM-SS.mp4"
  */
-function parseDateFromPath(dateDir, fileName) {
+function parseSegmentDate(dateDir, fileName) {
   try {
-    const [y, mo, d]      = dateDir.split('-').map(Number);
-    const base            = fileName.replace('.jpg', '');
-    const [h, mi, s, ms]  = base.split('-').map(Number);
-    return new Date(y, mo - 1, d, h, mi, s, ms);
+    const [y, mo, d] = dateDir.split('-').map(Number);
+    const [h, mi, s] = fileName.replace('.mp4', '').split('-').map(Number);
+    return new Date(y, mo - 1, d, h, mi, s, 0);
   } catch {
     return null;
   }
 }
 
 /**
- * Return an ordered list of frame file paths within [startTime, endTime].
+ * Return video segments (.mp4) whose time range overlaps [startTime, endTime].
+ * Each entry: { filePath: string, segStart: Date, segEnd: Date }
+ * Segments currently being recorded (segEnd > now) are excluded — the file's
+ * moov atom is not written until ffmpeg closes it.
  */
-async function getFramesInRange(startTime, endTime) {
-  const start = new Date(startTime);
-  const end   = new Date(endTime);
-  const framesDir = config.framesDir;
+function getVideoSegmentsInRange(startTime, endTime) {
+  const start      = new Date(startTime);
+  const end        = new Date(endTime);
+  const segDirRoot = config.segmentsDir;
+  const segSeconds = config.segmentDurationSeconds;
 
-  if (!fs.existsSync(framesDir)) return [];
+  if (!fs.existsSync(segDirRoot)) return [];
 
-  const dateDirs = fs.readdirSync(framesDir).sort();
-  const files = [];
+  const now      = new Date();
+  const dateDirs = fs.readdirSync(segDirRoot).sort();
+  const segments = [];
 
   for (const dateDir of dateDirs) {
-    const dirPath = path.join(framesDir, dateDir);
+    const dirPath = path.join(segDirRoot, dateDir);
     if (!fs.statSync(dirPath).isDirectory()) continue;
 
-    // Skip date directories clearly outside the requested range
     const dirStart = new Date(dateDir + 'T00:00:00');
     const dirEnd   = new Date(dateDir + 'T23:59:59.999');
     if (dirEnd < start || dirStart > end) continue;
 
-    const frameFiles = fs.readdirSync(dirPath).sort();
-    for (const fileName of frameFiles) {
-      if (!fileName.endsWith('.jpg')) continue;
-      const frameDate = parseDateFromPath(dateDir, fileName);
-      if (!frameDate) continue;
-      if (frameDate >= start && frameDate <= end) {
-        files.push(path.join(dirPath, fileName));
+    for (const fileName of fs.readdirSync(dirPath).sort()) {
+      if (!fileName.endsWith('.mp4')) continue;
+      const segStart = parseSegmentDate(dateDir, fileName);
+      if (!segStart) continue;
+      const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
+      // Skip segments still being recorded
+      if (segEnd > now) continue;
+      if (segEnd > start && segStart < end) {
+        segments.push({ filePath: path.join(dirPath, fileName), segStart, segEnd });
       }
     }
   }
 
-  return files;
+  return segments;
 }
 
 /**
@@ -155,4 +142,4 @@ function getAudioSegmentsInRange(startTime, endTime) {
   return segments;
 }
 
-module.exports = { saveFrame, saveSnapshot, getFramesInRange, getAudioSegmentsInRange };
+module.exports = { saveSnapshot, getVideoSegmentsInRange, getAudioSegmentsInRange };

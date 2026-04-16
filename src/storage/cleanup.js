@@ -8,29 +8,28 @@ const config = require('../config');
 function start() {
   // Run every hour at minute 0
   cron.schedule('0 * * * *', () => {
-    cleanOldFrames();
+    cleanOldSegments();
     cleanOldAudio();
     cleanOldLogs();
   });
   console.log(
-    `[Cleanup] Scheduled hourly frame cleanup (retention: ${config.frameRetentionHours}h).`
+    `[Cleanup] Scheduled hourly cleanup (retention: ${config.retentionHours}h).`
   );
 }
 
-function cleanOldFrames() {
-  const framesDir = config.framesDir;
-  if (!fs.existsSync(framesDir)) return;
+function cleanOldSegments() {
+  const segDir = config.segmentsDir;
+  if (!fs.existsSync(segDir)) return;
 
-  const cutoff = new Date(Date.now() - config.frameRetentionHours * 3600 * 1000);
+  const cutoff     = new Date(Date.now() - config.retentionHours * 3600 * 1000);
+  const segSeconds = config.segmentDurationSeconds;
   let deletedCount = 0;
 
-  const dateDirs = fs.readdirSync(framesDir);
-
-  for (const dateDir of dateDirs) {
-    const dirPath = path.join(framesDir, dateDir);
+  for (const dateDir of fs.readdirSync(segDir)) {
+    const dirPath = path.join(segDir, dateDir);
     if (!fs.statSync(dirPath).isDirectory()) continue;
 
-    // If the whole day is older than the cutoff, remove all files and the dir
+    // Quick-reject: whole day older than cutoff
     const dirEnd = new Date(dateDir + 'T23:59:59.999');
     if (dirEnd < cutoff) {
       for (const file of fs.readdirSync(dirPath)) {
@@ -40,22 +39,21 @@ function cleanOldFrames() {
       continue;
     }
 
-    // Otherwise check individual files within the day
     for (const fileName of fs.readdirSync(dirPath)) {
-      if (!fileName.endsWith('.jpg')) continue;
-      const [y, mo, d]     = dateDir.split('-').map(Number);
-      const base           = fileName.replace('.jpg', '');
-      const [h, mi, s, ms] = base.split('-').map(Number);
-      const fileDate = new Date(y, mo - 1, d, h, mi, s, ms);
-      if (isNaN(fileDate.getTime())) continue;
-      if (fileDate < cutoff) {
+      if (!fileName.endsWith('.mp4')) continue;
+      const [y, mo, d] = dateDir.split('-').map(Number);
+      const [h, mi, s] = fileName.replace('.mp4', '').split('-').map(Number);
+      const segStart = new Date(y, mo - 1, d, h, mi, s, 0);
+      if (isNaN(segStart.getTime())) continue;
+      const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
+      if (segEnd < cutoff) {
         try { fs.unlinkSync(path.join(dirPath, fileName)); deletedCount++; } catch { /* ignore */ }
       }
     }
   }
 
   if (deletedCount > 0) {
-    console.log(`[Cleanup] Deleted ${deletedCount} old frame(s).`);
+    console.log(`[Cleanup] Deleted ${deletedCount} old video segment(s).`);
   }
 }
 
@@ -63,7 +61,7 @@ function cleanOldAudio() {
   const audioDir = config.audioDir;
   if (!audioDir || !fs.existsSync(audioDir)) return;
 
-  const cutoff = new Date(Date.now() - config.frameRetentionHours * 3600 * 1000);
+    const cutoff = new Date(Date.now() - config.retentionHours * 3600 * 1000);
   let deletedCount = 0;
 
   for (const dateDir of fs.readdirSync(audioDir)) {
@@ -103,7 +101,7 @@ function cleanOldLogs() {
   const filePath = path.join(logsDir, 'app.log');
   if (!fs.existsSync(filePath)) return;
 
-  const cutoff = new Date(Date.now() - config.frameRetentionHours * 3600 * 1000);
+  const cutoff = new Date(Date.now() - config.retentionHours * 3600 * 1000);
 
   try {
     const content = fs.readFileSync(filePath, 'utf8');

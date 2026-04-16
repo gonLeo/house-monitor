@@ -114,6 +114,12 @@ function updateEventsCount(delta) {
   document.getElementById('events-count').textContent = _eventsCount;
 }
 
+function formatDuration(startTs, endTs) {
+  const secs = Math.max(0, Math.round((new Date(endTs) - new Date(startTs)) / 1000));
+  if (secs < 60) return `${secs}s`;
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+}
+
 function formatTs(ts) {
   return new Date(ts).toLocaleString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -141,6 +147,10 @@ function buildEventCard(ev) {
     ? `<div class="event-conf">conf: ${(ev.confidence * 100).toFixed(1)}%</div>`
     : '';
 
+  const durHtml = ev.ended_at
+    ? `<div class="event-conf">duração: ${formatDuration(ev.timestamp, ev.ended_at)}</div>`
+    : '';
+
   const typeClass = ev.type === 'connection_restored' ? 'connection_restored' : '';
 
   item.innerHTML = `
@@ -149,6 +159,7 @@ function buildEventCard(ev) {
       <div class="event-type ${typeClass}">${ev.type.replace(/_/g, ' ')}</div>
       <div class="event-ts">${formatTs(ev.timestamp)}</div>
       ${confHtml}
+      ${durHtml}
       <button class="btn-clip" onclick="openClipViewer('${ev.timestamp}')">▶ Ver Clipe</button>
     </div>`;
   return item;

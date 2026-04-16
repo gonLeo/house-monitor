@@ -4,65 +4,56 @@ const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
 const { spawn } = require('child_process');
-const config   = require('../config');
 const storage  = require('../storage/files');
 
 /**
- * Generate an MP4 clip from saved frames (+ audio if available) within a time
- * range and stream it to res.
- * Encodes to a temp file first — libx264 does not write reliably to pipe:1 on Windows.
+ * Generate an MP4 clip from stored video segments (+ audio if available) within
+ * a time range and stream it to res.
+ *
+ * Video segments are H.264 .mp4 files recorded continuously by VideoSegmentRecorder.
+ * The concat demuxer trims start/end segments to the requested window using
+ * inpoint/outpoint, so no video re-encode is needed — just a fast remux.
  *
  * @param {string|Date} startTime
  * @param {string|Date} endTime
- * @param {number}      fps
  * @param {import('express').Response} res
  */
-async function generate(startTime, endTime, fps, res) {
-  const frames = await storage.getFramesInRange(startTime, endTime);
+async function generate(startTime, endTime, res) {
+  const clipStart = new Date(startTime);
+  const clipEnd   = new Date(endTime);
 
-  if (frames.length === 0) {
-    res.status(404).json({ error: 'No frames found in the specified time range.' });
+  const videoSegments = storage.getVideoSegmentsInRange(startTime, endTime);
+
+  if (videoSegments.length === 0) {
+    res.status(404).json({ error: 'No video segments found in the specified time range.' });
     return;
   }
 
-  // Parse each frame's actual timestamp from the path (YYYY-MM-DD/HH-MM-SS-mmm.jpg)
-  // and compute real inter-frame durations so the video plays at 1x speed.
-  function parseFrameMs(framePath) {
-    const dateDir  = path.basename(path.dirname(framePath));   // "2026-04-13"
-    const fileName = path.basename(framePath, '.jpg');          // "15-04-50-657"
-    const [y, mo, d]     = dateDir.split('-').map(Number);
-    const [h, mi, s, ms] = fileName.split('-').map(Number);
-    return new Date(y, mo - 1, d, h, mi, s, ms).getTime();
-  }
-
-  const SPEED   = 1.0; // playback speed multiplier (>1 = faster)
-  const OUT_FPS  = 25;   // output framerate — higher = smoother (more frame duplication)
-  const defaultDuration = 1 / fps;
+  // Build video concat list with inpoint/outpoint to trim the first and last segments.
   const videoLines = [];
-  for (let i = 0; i < frames.length; i++) {
-    const absPath = path.resolve(frames[i]).replace(/\\/g, '/');
-    const rawDuration = i < frames.length - 1
-      ? (parseFrameMs(frames[i + 1]) - parseFrameMs(frames[i])) / 1000
-      : defaultDuration;
-    const duration = rawDuration / SPEED;
+  for (const seg of videoSegments) {
+    const absPath  = path.resolve(seg.filePath).replace(/\\/g, '/');
+    const inpoint  = Math.max(0, (clipStart.getTime() - seg.segStart.getTime()) / 1000);
+    const outpoint = Math.min(
+      (seg.segEnd.getTime() - seg.segStart.getTime()) / 1000,
+      (clipEnd.getTime()   - seg.segStart.getTime()) / 1000,
+    );
     videoLines.push(`file '${absPath}'`);
-    videoLines.push(`duration ${duration.toFixed(6)}`);
+    if (inpoint  > 0.01)  videoLines.push(`inpoint ${inpoint.toFixed(3)}`);
+    if (outpoint > 0.001) videoLines.push(`outpoint ${outpoint.toFixed(3)}`);
   }
 
-  // Build audio concat list if segments are available
-  const clipStart      = new Date(startTime);
-  const clipEnd        = new Date(endTime);
-  const audioSegments  = storage.getAudioSegmentsInRange(startTime, endTime);
-  const hasAudio       = audioSegments.length > 0;
-  const audioLines     = [];
+  // Build audio concat list (same strategy as before).
+  const audioSegments = storage.getAudioSegmentsInRange(startTime, endTime);
+  const hasAudio      = audioSegments.length > 0;
+  const audioLines    = [];
   if (hasAudio) {
-    const segSeconds = config.audio.segmentSeconds;
     for (const seg of audioSegments) {
       const absPath  = path.resolve(seg.filePath).replace(/\\/g, '/');
       const inpoint  = Math.max(0, (clipStart.getTime() - seg.segStart.getTime()) / 1000);
-      const outpoint = Math.min(segSeconds, (clipEnd.getTime() - seg.segStart.getTime()) / 1000);
+      const outpoint = (clipEnd.getTime() - seg.segStart.getTime()) / 1000;
       audioLines.push(`file '${absPath}'`);
-      if (inpoint > 0.01) audioLines.push(`inpoint ${inpoint.toFixed(3)}`);
+      if (inpoint  > 0.01) audioLines.push(`inpoint ${inpoint.toFixed(3)}`);
       audioLines.push(`outpoint ${outpoint.toFixed(3)}`);
     }
   }
@@ -83,21 +74,21 @@ async function generate(startTime, endTime, fps, res) {
 
   let aborted = false;
 
+  // Video: stream copy (no re-encode) — segments are already H.264.
+  // Audio: re-encode to AAC for compatibility (m4a → mp4 container).
   const args = [
     '-f', 'concat', '-safe', '0', '-i', tmpVideoList,
   ];
   if (hasAudio) {
     args.push('-f', 'concat', '-safe', '0', '-i', tmpAudioList);
   }
-  args.push(
-    '-c:v', 'libx264',
-    '-pix_fmt', 'yuv420p',
-    '-r', String(OUT_FPS),
-  );
+  args.push('-c:v', 'copy');
   if (hasAudio) {
     args.push('-c:a', 'aac', '-b:a', '64k');
+  } else {
+    args.push('-an');
   }
-  args.push('-y', tmpOut);
+  args.push('-movflags', '+faststart', '-y', tmpOut);
 
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
 

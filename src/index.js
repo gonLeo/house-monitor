@@ -13,9 +13,10 @@ const { waitForConnection } = require('./db/connection');
 const { runMigrations }     = require('./db/migrations');
 const db           = require('./db/queries');
 const detector     = require('./detection/detector');
-const CooldownTimer = require('./detection/cooldown');
+const PresenceTracker  = require('./detection/presenceTracker');
 const CameraCapture = require('./capture/camera');
 const pipeline      = require('./capture/pipeline');
+const VideoSegmentRecorder = require('./capture/videoRecorder');
 const WsServer      = require('./streaming/wsServer');
 const ConnectivityMonitor = require('./connectivity/monitor');
 const storage       = require('./storage/files');
@@ -32,6 +33,7 @@ async function main() {
   fs.mkdirSync(config.framesDir,    { recursive: true });
   fs.mkdirSync(config.snapshotsDir, { recursive: true });
   fs.mkdirSync(config.audioDir,     { recursive: true });
+  fs.mkdirSync(config.segmentsDir,  { recursive: true });
 
   // 1. Connect to database (waits for Docker PostgreSQL to be ready)
   await waitForConnection();
@@ -44,10 +46,11 @@ async function main() {
   await detector.load();
 
   // 4. Create HTTP server + Express app
-  const camera         = new CameraCapture();
-  const audioRecorder  = new AudioRecorder();
-  const cooldown       = new CooldownTimer(config.cooldownSeconds * 1000);
-  const connectivity   = new ConnectivityMonitor();
+  const camera          = new CameraCapture();
+  const audioRecorder   = new AudioRecorder();
+  const videoRecorder   = new VideoSegmentRecorder();
+  const presenceTracker = new PresenceTracker(config.absenceThresholdSeconds * 1000);
+  const connectivity    = new ConnectivityMonitor();
 
   const app        = createServer(db, connectivity, camera);
   const httpServer = http.createServer(app);
@@ -60,23 +63,26 @@ async function main() {
   connectivity.start(db);
 
   // 7. Wire camera → pipeline
-  pipeline.start({ camera, wsServer, detector, cooldown, db, storage });
+  pipeline.start({ camera, wsServer, detector, presenceTracker, videoRecorder, db, storage });
   camera.start();
   audioRecorder.start();
+  videoRecorder.start();
 
   // 8. Start HTTP server
   httpServer.listen(config.port, () => {
     console.log(`[App] ✓ Server running  →  http://localhost:${config.port}`);
     console.log(`[App] Camera device    →  "${config.camera.device}"`);
     console.log(`[App] Frame capture    →  ${config.camera.fps} fps at ${config.camera.width}x${config.camera.height}`);
-    console.log(`[App] Cooldown         →  ${config.cooldownSeconds}s between alerts`);
-    console.log(`[App] Frames stored at →  ${config.framesDir} (deleted after ${config.frameRetentionHours}h)`);
+    console.log(`[App] Video segments   →  ${config.segmentDurationSeconds}s .mp4 files at ${config.segmentFps}fps → ${config.segmentsDir}`);
+    console.log(`[App] Absence timeout  →  ${config.absenceThresholdSeconds}s without detection ends presence`);
+    console.log(`[App] Retention        →  ${config.retentionHours}h`);
   });
 
   // 9. Graceful shutdown
   async function shutdown(signal) {
     console.log(`\n[App] ${signal} received. Shutting down…`);
     camera.stop();
+    videoRecorder.stop();
     audioRecorder.stop();
     connectivity.stop();
     httpServer.close(async () => {
