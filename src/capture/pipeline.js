@@ -6,8 +6,8 @@
 const DETECTION_SKIP = 15;
 
 // Frame save: pipe to encoder once every N frames.
-// At 30fps, FRAME_SAVE_SKIP=3 gives 10fps to the H.264 encoder — must match SEGMENT_FPS in .env.
-const FRAME_SAVE_SKIP = 3;
+// At 30fps, FRAME_SAVE_SKIP=2 gives 15fps to the H.264 encoder — must match SEGMENT_FPS in .env.
+const FRAME_SAVE_SKIP = 2;
 
 const MIN_CONFIDENCE = 0.5;
 
@@ -92,7 +92,15 @@ function start({ camera, wsServer, detector, presenceTracker, videoRecorder, db,
         }
 
       } else {
-        presenceTracker.personAbsent();
+        // No person in this frame — advance the absence timer.
+        // When the threshold is reached, personAbsent() returns closing info so we
+        // can write the final ended_at (= last moment person was actually seen).
+        const closing = presenceTracker.personAbsent();
+        if (closing) {
+          db.updateEventEndedAt(closing.eventId, closing.endedAt).catch((err) => {
+            console.warn('[Pipeline] Failed to finalize ended_at:', err.message);
+          });
+        }
       }
     } catch (err) {
       console.error('[Pipeline] Error during detection:', err.message);

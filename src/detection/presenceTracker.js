@@ -73,16 +73,19 @@ class PresenceTracker {
   /**
    * Notify the tracker that no person was found in the current frame.
    * If the absence threshold has elapsed, the presence window is closed.
+   * @returns {{ action: 'end', eventId: string, endedAt: Date } | null}
    */
   personAbsent() {
-    if (!this._active) return;
+    if (!this._active) return null;
     if (Date.now() - this._lastSeenMs >= this._absenceMs) {
-      console.log(
-        `[Presence] Presence ended for event ${this._currentEventId}.`
-      );
+      const endedAt = new Date(this._lastSeenMs); // last moment person was actually seen
+      const eventId = this._currentEventId;
+      console.log(`[Presence] Presence ended for event ${eventId}.`);
       this._active         = false;
       this._currentEventId = null;
+      return { action: 'end', eventId, endedAt };
     }
+    return null;
   }
 }
 

@@ -153,6 +153,16 @@ function buildEventCard(ev) {
 
   const typeClass = ev.type === 'connection_restored' ? 'connection_restored' : '';
 
+  // Clip button: only enable once the segment covering the event end is finalised.
+  // Segments take ~60s to record; allow 70s after ended_at before enabling.
+  // Events without ended_at are still ongoing — button stays disabled.
+  const CLIP_READY_MS  = 70 * 1000;
+  const endedAtMs      = ev.ended_at ? new Date(ev.ended_at).getTime() : NaN;
+  const clipReady      = !isNaN(endedAtMs) && (Date.now() - endedAtMs) > CLIP_READY_MS;
+  const clipBtn = clipReady
+    ? `<button class="btn-clip" onclick="openClipViewer('${ev.timestamp}', '${ev.ended_at}')">▶ Ver Clipe</button>`
+    : `<button class="btn-clip" disabled title="Disponível ~70s após o fim do evento">⏳ Processando…</button>`;
+
   item.innerHTML = `
     ${thumbHtml}
     <div class="event-info">
@@ -160,7 +170,7 @@ function buildEventCard(ev) {
       <div class="event-ts">${formatTs(ev.timestamp)}</div>
       ${confHtml}
       ${durHtml}
-      <button class="btn-clip" onclick="openClipViewer('${ev.timestamp}')">▶ Ver Clipe</button>
+      ${clipBtn}
     </div>`;
   return item;
 }
@@ -241,12 +251,14 @@ async function loadConnectivity() {
 }
 
 // ── Clip viewer modal ─────────────────────────────────────────
-const CLIP_DURATION_MS = 2 * 60 * 1000; // 2 minutes from event
+const CLIP_PADDING_MS = 10 * 1000; // 10s before/after the event window
 let _clipObjectUrl = null;
 
-async function openClipViewer(timestamp) {
-  const start = new Date(timestamp);
-  const end   = new Date(start.getTime() + CLIP_DURATION_MS);
+async function openClipViewer(timestamp, endedAt) {
+  const eventStart = new Date(timestamp);
+  const eventEnd   = endedAt ? new Date(endedAt) : eventStart;
+  const start = new Date(eventStart.getTime() - CLIP_PADDING_MS);
+  const end   = new Date(eventEnd.getTime()   + CLIP_PADDING_MS);
   const url   = `/clip?startTime=${encodeURIComponent(start.toISOString())}&endTime=${encodeURIComponent(end.toISOString())}`;
 
   const overlay  = document.getElementById('clip-modal-overlay');

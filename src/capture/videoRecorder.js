@@ -78,19 +78,24 @@ class VideoSegmentRecorder {
     const outPath = path.join(dateDir, `${getSegmentName(now)}.mp4`);
 
     // Input: raw MJPEG frames piped one-by-one; each is a complete JPEG buffer.
-    // The declared input framerate must match the rate at which pipeline.js feeds
-    // frames (30fps camera / FRAME_SAVE_SKIP=3 = 10fps → matches config.segmentFps).
+    // -use_wallclock_as_timestamps replaces ffmpeg's frame-count-based PTS with the
+    // actual wall-clock time each frame arrived at the pipe. Without this, if the
+    // real delivery rate drifts below the declared framerate (pipeline jitter, dshow
+    // timing), the video plays faster than real time and inpoint/outpoint seek to the
+    // wrong positions in clips.js.
     const proc = spawn('ffmpeg', [
+      '-use_wallclock_as_timestamps', '1',
       '-f',         'image2pipe',
       '-vcodec',    'mjpeg',
-      '-framerate', String(config.segmentFps),
+      '-framerate', String(config.segmentFps), // hint only; actual PTS from wallclock
       '-i',         'pipe:0',
       '-c:v',       'libx264',
       '-crf',       '28',
       '-preset',    'ultrafast',
       '-pix_fmt',   'yuv420p',
       '-r',         String(config.segmentFps),
-      '-movflags',  '+faststart',   // moov at front → seekable during concat
+      '-g',         '30',          // keyframe every 2s at 15fps; limits seek inaccuracy to ≤2s
+      '-movflags',  '+faststart',  // moov at front → seekable during concat
       '-y',         outPath,
     ], { stdio: ['pipe', 'ignore', 'pipe'] });
 
