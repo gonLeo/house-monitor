@@ -7,7 +7,7 @@ const DETECTION_SKIP = 15;
 
 // Frame save: pipe to encoder once every N frames.
 // At 30fps, FRAME_SAVE_SKIP=2 gives 15fps to the H.264 encoder — must match SEGMENT_FPS in .env.
-const FRAME_SAVE_SKIP = 2;
+const FRAME_SAVE_SKIP = 2; // 30fps / 2 = 15fps to encoder
 
 const MIN_CONFIDENCE = 0.5;
 

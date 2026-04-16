@@ -90,11 +90,12 @@ class VideoSegmentRecorder {
       '-framerate', String(config.segmentFps), // hint only; actual PTS from wallclock
       '-i',         'pipe:0',
       '-c:v',       'libx264',
-      '-crf',       '28',
-      '-preset',    'ultrafast',
+      '-crf',       '23',
+      '-preset',    'fast',
       '-pix_fmt',   'yuv420p',
       '-r',         String(config.segmentFps),
       '-g',         '30',          // keyframe every 2s at 15fps; limits seek inaccuracy to ≤2s
+      '-tune',      'film',        // optimise for natural motion content
       '-movflags',  '+faststart',  // moov at front → seekable during concat
       '-y',         outPath,
     ], { stdio: ['pipe', 'ignore', 'pipe'] });

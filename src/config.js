@@ -12,9 +12,9 @@ module.exports = {
   },
   camera: {
     device: process.env.CAMERA_DEVICE || 'Integrated Webcam',
-    width:  parseInt(process.env.CAMERA_WIDTH  || '640', 10),
-    height: parseInt(process.env.CAMERA_HEIGHT || '480', 10),
-    fps:    parseInt(process.env.CAMERA_FPS    || '10',  10),
+    width:  parseInt(process.env.CAMERA_WIDTH  || '1280', 10),
+    height: parseInt(process.env.CAMERA_HEIGHT || '720',  10),
+    fps:    parseInt(process.env.CAMERA_FPS    || '30',   10),
   },
   audio: {
     // Set AUDIO_DEVICE to the exact dshow audio device name (empty = disabled).
@@ -32,8 +32,8 @@ module.exports = {
   segmentsDir:             process.env.SEGMENTS_DIR                        || './segments',
   segmentDurationSeconds:  parseInt(process.env.SEGMENT_DURATION_SECONDS   || '60',   10),
   // FPS at which pipeline feeds frames into the video encoder.
-  // Must match: Math.round(camera.fps / FRAME_SAVE_SKIP) where FRAME_SAVE_SKIP=3.
-  segmentFps:              parseInt(process.env.SEGMENT_FPS                || '10',   10),
+  // Must match: Math.round(camera.fps / FRAME_SAVE_SKIP) where FRAME_SAVE_SKIP=2.
+  segmentFps:              parseInt(process.env.SEGMENT_FPS                || '15',   10),
   retentionHours:          parseInt(process.env.RETENTION_HOURS            || '12',   10),
   logsDir:                 process.env.LOGS_DIR                            || './logs',
 };
