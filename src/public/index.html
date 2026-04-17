@@ -180,16 +180,16 @@
   <div class="clip-modal-overlay" id="cleanup-modal-overlay">
     <div class="clip-modal" style="max-width:420px">
       <div class="clip-modal-header">
-        <h3>🗑️ Limpar arquivos antigos</h3>
+        <h3>🗑️ Apagar tudo</h3>
         <button class="btn-secondary" onclick="closeCleanupModal()">✕ Fechar</button>
       </div>
       <div style="padding:20px 24px;">
         <p style="margin:0 0 12px;line-height:1.6">
-          Esta ação vai remover <strong>todos os vídeos, áudios e frames</strong> mais antigos que
-          <strong id="cleanup-retention-label">—</strong>, seguindo a mesma regra da limpeza automática.
+          Esta ação vai remover <strong>todos os vídeos e áudios gravados</strong>, independente da data.
+          A limpeza automática também ocorre a cada <strong id="cleanup-retention-label">—</strong> horas.
         </p>
         <p style="margin:0 0 20px;color:var(--red);font-size:13px;line-height:1.5">
-          ⚠️ O histórico de gravações será removido permanentemente. Os eventos no banco de dados <em>não</em> são apagados.
+          ⚠️ Todo o histórico de gravações será apagado permanentemente. Os eventos no banco de dados <em>não</em> são afetados.
         </p>
         <div style="display:flex;gap:10px;justify-content:flex-end">
           <button class="btn-secondary" onclick="closeCleanupModal()">Cancelar</button>
