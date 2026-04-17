@@ -5,14 +5,16 @@ const path = require('path');
 const cron = require('node-cron');
 const config = require('../config');
 const ntfy   = require('../notifications/ntfy');
+const db     = require('../db/queries');
 
 function start() {
-  // Run every retentionHours hours and wipe all media files
+  // Run every retentionHours hours and wipe all media files + DB records
   const cronExpr = `0 */${config.retentionHours} * * *`;
-  cron.schedule(cronExpr, () => {
+  cron.schedule(cronExpr, async () => {
     const seg   = cleanAllSegments();
     const audio = cleanAllAudio();
     cleanAllLogs();
+    await cleanAllDbRecords();
 
     const totalBytes = seg.bytes + audio.bytes;
     const totalFiles = seg.files + audio.files;
@@ -82,6 +84,16 @@ function cleanAllAudio() {
   return { bytes: deletedBytes, files: deletedCount };
 }
 
+async function cleanAllDbRecords() {
+  try {
+    const events = await db.deleteAllEvents();
+    const logs   = await db.deleteAllConnectivityLogs();
+    console.log(`[Cleanup] Deleted ${events} event(s) and ${logs} connectivity log(s) from DB.`);
+  } catch (err) {
+    console.error('[Cleanup] Failed to delete DB records:', err.message);
+  }
+}
+
 function cleanAllLogs() {
   const logsDir = config.logsDir;
   if (!logsDir) return;
@@ -93,10 +105,11 @@ function cleanAllLogs() {
   } catch { /* ignore */ }
 }
 
-function runCleanupNow() {
+async function runCleanupNow() {
   const seg   = cleanAllSegments();
   const audio = cleanAllAudio();
   cleanAllLogs();
+  await cleanAllDbRecords();
 
   const totalBytes = seg.bytes + audio.bytes;
   const totalFiles = seg.files + audio.files;

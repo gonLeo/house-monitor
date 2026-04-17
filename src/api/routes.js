@@ -174,8 +174,8 @@ function setup(app, db, connectivity, camera) {
   // ------------------------------------------------------------------
   // POST /api/cleanup/run — triggers an immediate cleanup (same as cron)
   // ------------------------------------------------------------------
-  app.post('/api/cleanup/run', (req, res) => {
-    const result = cleanup.runCleanupNow();
+  app.post('/api/cleanup/run', async (req, res) => {
+    const result = await cleanup.runCleanupNow();
     // Refresh storage cache right after so the UI reflects the freed space
     computeStorageUsage();
     res.json(result);
