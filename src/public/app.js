@@ -404,10 +404,11 @@ async function confirmCleanup() {
     resultEl.style.display = 'block';
     resultEl.style.color = 'var(--green)';
     resultEl.textContent =
-      `✅ Limpeza concluída: ${filesCount} arquivo(s) removido(s) (${formatBytes(removedBytes)}).`;
-    // Refresh storage badge
+      `✅ Limpeza concluída: ${filesCount} arquivo(s) removido(s) (${formatBytes(removedBytes)}). Recarregando…`;
+    // Refresh storage badge then reload to clear events/history lists
     fetchStorageUsage();
     btn.textContent = 'Concluído';
+    setTimeout(() => location.reload(), 1500);
   } catch {
     resultEl.style.display = 'block';
     resultEl.style.color = 'var(--red)';

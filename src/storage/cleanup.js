@@ -13,11 +13,12 @@ function start() {
   cron.schedule(cronExpr, async () => {
     const seg   = cleanAllSegments();
     const audio = cleanAllAudio();
+    const snaps = cleanAllSnapshots();
     cleanAllLogs();
     await cleanAllDbRecords();
 
-    const totalBytes = seg.bytes + audio.bytes;
-    const totalFiles = seg.files + audio.files;
+    const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
+    const totalFiles = seg.files + audio.files + snaps.files;
 
     ntfy.cleanupDone({
       removedBytes:   totalBytes,
@@ -53,6 +54,29 @@ function cleanAllSegments() {
 
   if (deletedCount > 0) {
     console.log(`[Cleanup] Deleted ${deletedCount} video segment(s).`);
+  }
+  return { bytes: deletedBytes, files: deletedCount };
+}
+
+function cleanAllSnapshots() {
+  const snapDir = config.snapshotsDir;
+  if (!snapDir || !fs.existsSync(snapDir)) return { bytes: 0, files: 0 };
+
+  let deletedCount = 0;
+  let deletedBytes = 0;
+
+  for (const file of fs.readdirSync(snapDir)) {
+    const filePath = path.join(snapDir, file);
+    try {
+      if (!fs.statSync(filePath).isFile()) continue;
+      deletedBytes += fs.statSync(filePath).size;
+      fs.unlinkSync(filePath);
+      deletedCount++;
+    } catch { /* ignore */ }
+  }
+
+  if (deletedCount > 0) {
+    console.log(`[Cleanup] Deleted ${deletedCount} snapshot(s).`);
   }
   return { bytes: deletedBytes, files: deletedCount };
 }
@@ -108,11 +132,12 @@ function cleanAllLogs() {
 async function runCleanupNow() {
   const seg   = cleanAllSegments();
   const audio = cleanAllAudio();
+  const snaps = cleanAllSnapshots();
   cleanAllLogs();
   await cleanAllDbRecords();
 
-  const totalBytes = seg.bytes + audio.bytes;
-  const totalFiles = seg.files + audio.files;
+  const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
+  const totalFiles = seg.files + audio.files + snaps.files;
 
   console.log(`[Cleanup] Manual cleanup triggered: ${totalFiles} file(s) removed.`);
 
