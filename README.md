@@ -1,296 +1,181 @@
-# House Monitor MVP
+# House Monitor
 
-Sistema de videomonitoramento local resiliente com detecção de humanos por IA, operação offline-first e armazenamento em PostgreSQL + disco.
+Turn an old webcam into an effective home security system — no subscriptions, no cloud, no monthly fees.
 
----
-
-## Arquitetura
-
-```
-┌─────────────────────────────────────────────────────┐
-│                  Node.js (host)                     │
-│                                                     │
-│  FFmpeg (dshow) → CameraCapture → Pipeline          │
-│                       │                             │
-│              ┌────────┼────────────┐                │
-│              ▼        ▼            ▼                │
-│         WebSocket  Detector    Storage (disco)      │
-│         (stream)  (COCO-SSD)   frames/ snapshots/   │
-│              │        │                             │
-│              │        └─► DB Queries ──► PostgreSQL │
-│              │                    (Docker)          │
-│              ▼                                      │
-│         Browser SPA  ◄──► REST API (Express)        │
-└─────────────────────────────────────────────────────┘
-```
-
-- **Captura**: FFmpeg DirectShow → MJPEG → parser de boundaries JPEG
-- **Detecção**: TF.js (CPU, puro-JS) + COCO-SSD `lite_mobilenet_v2`
-- **Persistência**: PostgreSQL 15 (Docker) + JPEGs em disco
-- **Conectividade**: `dns.resolve('google.com')` a cada 5 min
-- **Frontend**: HTML vanilla, WebSocket para stream ao vivo
+House Monitor runs entirely on your local machine. It streams live video from any DirectShow webcam, detects people using an on-device AI model (COCO-SSD / TensorFlow.js), records continuous H.264 video segments, saves event snapshots, and displays everything in a browser dashboard. All data stays on your machine and recording continues even when your internet goes down.
 
 ---
 
-## Pré-requisitos
+## Features
 
-| Ferramenta | Versão mínima | Como instalar |
+- **Live stream** — real-time MJPEG stream in the browser via WebSocket
+- **Person detection** — on-device AI inference, no cloud API required
+- **Continuous recording** — H.264 video segments written to disk at all times
+- **Snapshot on detection** — saves a JPEG for every person-detected event
+- **Clip generation** — export any time range as an MP4 directly from the browser
+- **Audio recording** — optional microphone capture synced to video clips
+- **Push notifications** — optional alerts via [ntfy.sh](https://ntfy.sh) on person detection
+- **Offline-first** — connectivity monitor tracks outages; recording never stops
+- **Auto cleanup** — old segments, audio, and logs are deleted automatically (configurable retention)
+
+---
+
+## Requirements
+
+| Tool | Min version | Notes |
 |---|---|---|
-| Node.js | 18.x | https://nodejs.org |
-| Docker Desktop | 24.x | https://docker.com/products/docker-desktop |
-| FFmpeg | 6.x | https://ffmpeg.org/download.html |
+| [Node.js](https://nodejs.org) | 18.x | |
+| [Docker Desktop](https://www.docker.com/products/docker-desktop) | 24.x | Runs PostgreSQL |
+| [FFmpeg](https://ffmpeg.org/download.html) | 6.x | See install note below |
 
-> **FFmpeg no Windows**: Baixe o build estático, extraia e adicione a pasta `bin/` ao PATH do sistema.
-> Verifique com: `ffmpeg -version`
+### Installing FFmpeg on Windows
+
+1. Download the **full build** (static) from [ffmpeg.org/download.html](https://ffmpeg.org/download.html) — choose the Windows build from *gyan.dev* or *BtbN*.
+2. Extract the zip and add the `bin/` folder to your system **PATH**:
+   - Search *"Edit the system environment variables"* → Environment Variables → Path → New → paste the path to `bin/`.
+3. Open a new terminal and verify:
+   ```powershell
+   ffmpeg -version
+   ```
 
 ---
 
-## Instalação e uso
+## Setup
 
-### 1 — Descobrir o nome da sua webcam
-
-Abra um terminal e execute:
+### 1. Find your webcam name
 
 ```powershell
 ffmpeg -list_devices true -f dshow -i dummy 2>&1
 ```
 
-Você verá algo como:
-```
-[dshow @ ...] "Integrated Webcam" (video)
-[dshow @ ...] "USB2.0 HD UVC WebCam" (video)
-```
+Look for a line like `"Integrated Webcam" (video)` and copy the exact device name.
 
-Copie o nome exato (incluindo maiúsculas/minúsculas).
-
-### 2 — Configurar variáveis de ambiente
+### 2. Configure environment
 
 ```powershell
 copy .env.example .env
 ```
 
-Abra `.env` e ajuste:
+Open `.env` and set at minimum:
 
 ```env
-CAMERA_DEVICE=Integrated Webcam   # ← Cole o nome exacto aqui
-CAMERA_FPS=10
-COOLDOWN_SECONDS=30
-PORT=3000
+CAMERA_DEVICE=Your Webcam Name    # exact name from step 1
+AUDIO_DEVICE=Microphone (...)     # exact name from step 1, or leave empty
 ```
 
-### 3 — Iniciar o banco de dados
+All other values have sensible defaults. Change `DB_PASSWORD` from the default if you want extra hardening on the local Postgres instance.
+
+### 3. Start the database
 
 ```powershell
 docker compose up -d
 ```
 
-Aguarde o healthcheck passar:
+Wait until Docker reports the container as `(healthy)`:
 
 ```powershell
 docker ps
-# STATUS deve mostrar "(healthy)"
 ```
 
-### 4 — Instalar dependências Node.js
+### 4. Install dependencies
 
 ```powershell
 npm install
 ```
 
-> **Nota**: `@tensorflow/tfjs` + `@tensorflow-models/coco-ssd` somam ~150 MB.
+> TensorFlow.js + COCO-SSD are ~150 MB. The COCO-SSD model weights (~10 MB) are downloaded on first run.
 
-### 5 — Iniciar a aplicação
+### 5. Start the app
 
 ```powershell
 npm start
 ```
 
-Na primeira execução, o modelo COCO-SSD (~10 MB) é baixado da CDN do Google.
-
-Resultado esperado:
-```
-╔══════════════════════════════════╗
-║        House Monitor MVP         ║
-╚══════════════════════════════════╝
-[DB] Connection established.
-[DB] Migrations applied successfully.
-[App] Loading COCO-SSD model…
-[Detector] TF.js backend: cpu
-[Detector] COCO-SSD model loaded.
-[App] ✓ Server running  →  http://localhost:3000
-[Camera] Starting capture: device="Integrated Webcam" 640x480 @ 10fps
-[Connectivity] Monitor started (interval: 5 min).
-[Pipeline] Started.
-```
-
-### 6 — Acessar o frontend
-
-Abra: **http://localhost:3000**
+Open **http://localhost:3000** in your browser.
 
 ---
 
-## Interface Web
+## How it works
 
-| Seção | Descrição |
+```
+Webcam (DirectShow)
+  └─► FFmpeg MJPEG stream
+        └─► Frame parser (JPEG boundaries)
+              ├─► WebSocket → Browser live view
+              ├─► Video encoder → H.264 segments (segments/YYYY-MM-DD/)
+              ├─► Audio recorder → m4a segments (audio/YYYY-MM-DD/)
+              └─► Worker Thread: COCO-SSD inference
+                    └─► Person detected?
+                          ├─► Save snapshot (snapshots/)
+                          ├─► Insert event → PostgreSQL
+                          ├─► Push notification (ntfy.sh, optional)
+                          └─► Alert in browser
+```
+
+- Detection runs in a dedicated worker thread — inference never blocks the stream.
+- A presence tracker groups detections into sessions; a new event is created after `ABSENCE_THRESHOLD_SECONDS` of no detections.
+- Every `RETENTION_HOURS` hours the cleanup job runs and wipes all segments, audio, logs, and snapshots.
+
+---
+
+## Configuration (`.env`)
+
+| Variable | Default | Description |
+|---|---|---|
+| `CAMERA_DEVICE` | `Integrated Webcam` | DirectShow video device name |
+| `CAMERA_WIDTH/HEIGHT` | `1280` / `720` | Capture resolution |
+| `CAMERA_FPS` | `30` | Capture framerate |
+| `AUDIO_DEVICE` | *(empty)* | DirectShow audio device — leave empty to disable |
+| `ABSENCE_THRESHOLD_SECONDS` | `60` | Seconds of no detection before presence session ends |
+| `SEGMENTS_DIR` | `./segments` | Where H.264 video segments are stored |
+| `SEGMENT_DURATION_SECONDS` | `60` | Duration of each video segment file |
+| `SEGMENT_FPS` | `15` | FPS written into segment files |
+| `RETENTION_HOURS` | `12` | Interval in hours between full cleanup runs (deletes all media) |
+| `NTFY_TOPIC` | *(empty)* | [ntfy.sh](https://ntfy.sh) topic for push notifications |
+| `PORT` | `3000` | HTTP server port |
+| `DB_PASSWORD` | `monitor123` | PostgreSQL password (local only) |
+
+---
+
+## API
+
+| Endpoint | Description |
 |---|---|
-| **Ao Vivo** | Stream da câmera com FPS e status de conexão |
-| **Eventos** | Lista com thumbnail, timestamp e confiança. Filtrável por data |
-| **Gerar Clipe** | Selecione intervalo e baixe um MP4 com os frames do período |
-| **Histórico de Conectividade** | Log de quedas/restabelecimentos de internet |
+| `GET /events` | List detection events (`startTime`, `endTime`, `type` filters) |
+| `GET /snapshot/:id` | JPEG snapshot for an event |
+| `GET /clip?startTime=&endTime=` | Generate and download an MP4 clip |
+| `GET /status` | Camera, connectivity, uptime, last event |
+| `GET /api/alarm` | Get alarm enabled state |
+| `POST /api/alarm` | Toggle alarm `{ "enabled": true }` |
 
 ---
 
-## API REST
-
-| Endpoint | Descrição |
-|---|---|
-| `GET /events` | Lista eventos. Params: `startTime`, `endTime`, `synced`, `type` |
-| `GET /snapshot/:id` | Retorna o JPEG de uma detecção |
-| `GET /clip?startTime=&endTime=` | Gera e faz download de clipe MP4 |
-| `GET /status` | Status atual: câmera, conectividade, uptime, histórico |
-
-Exemplos:
-
-```bash
-# Todos os eventos da última hora
-curl "http://localhost:3000/events?startTime=2026-01-01T12:00:00Z"
-
-# Status do sistema
-curl "http://localhost:3000/status"
-
-# Clipe de 10 minutos
-curl -o clip.mp4 "http://localhost:3000/clip?startTime=2026-01-01T12:00:00Z&endTime=2026-01-01T12:10:00Z"
-```
-
----
-
-## Testando a resiliência offline
-
-1. Com o sistema rodando, verifique que o status no frontend mostra **online**.
-
-2. **Simule queda de internet** no Windows:
-   - Acesse **Configurações → Rede → Wi-Fi (ou Ethernet)** e desative o adaptador.
-   - Ou execute: `netsh interface set interface "Wi-Fi" disable`
-
-3. Aguarde até **5 minutos** (intervalo do monitor de conectividade).
-
-4. O console mostrará:
-   ```
-   [Connectivity] Status changed: online → offline
-   [Connectivity] Internet connection lost. Events will continue to be recorded locally.
-   ```
-
-5. Posicione alguém na frente da câmera — os eventos continuam sendo salvos normalmente no PostgreSQL.
-
-6. **Restabeleça a conexão**:
-   - `netsh interface set interface "Wi-Fi" enable`
-
-7. No próximo ciclo de verificação (até 5 min), o console exibirá:
-   ```
-   [Connectivity] ✓ Connection restored!
-     Offline period : 2026-01-01T12:05:00.000Z → 2026-01-01T12:47:00.000Z
-     Duration       : ~42 minute(s)
-     Events recorded: 3
-   ```
-   Um evento `connection_restored` também é gravado no banco.
-
----
-
-## Estrutura de diretórios
-
-```
-house-monitor/
-├── docker-compose.yml       # PostgreSQL 15 (único serviço Docker)
-├── .env.example             # Template de configuração
-├── .gitignore
-├── package.json
-├── README.md
-├── sql/
-│   └── schema.sql           # CREATE TABLE events, connectivity_log
-├── src/
-│   ├── index.js             # Entry point
-│   ├── config.js            # dotenv + valores padrão
-│   ├── db/
-│   │   ├── connection.js    # pg.Pool + retry de conexão
-│   │   ├── migrations.js    # Aplica schema.sql no startup
-│   │   └── queries.js       # Todas as operações de DB
-│   ├── capture/
-│   │   ├── camera.js        # FFmpeg dshow + parser MJPEG
-│   │   └── pipeline.js      # Orquestra frame→detect→stream→save
-│   ├── detection/
-│   │   ├── detector.js      # TF.js + COCO-SSD (CPU backend)
-│   │   └── cooldown.js      # Anti-spam 30s
-│   ├── streaming/
-│   │   └── wsServer.js      # WebSocket server + FPS counter
-│   ├── connectivity/
-│   │   └── monitor.js       # Check DNS a cada 5min
-│   ├── storage/
-│   │   ├── files.js         # saveFrame(), saveSnapshot(), getFramesInRange()
-│   │   └── cleanup.js       # Cron: apaga frames > 48h
-│   ├── api/
-│   │   ├── server.js        # Express setup
-│   │   ├── routes.js        # Rotas REST
-│   │   └── clips.js         # FFmpeg concat → MP4
-│   └── public/
-│       └── index.html       # SPA (HTML + JS vanilla)
-├── frames/                  # Criado em runtime — frames contínuos
-└── snapshots/               # Criado em runtime — snapshots de detecções
-```
-
----
-
-## Configurações avançadas
-
-### Aumentar sensibilidade de detecção
-
-Edite `src/capture/pipeline.js`:
-```js
-const MIN_CONFIDENCE = 0.4; // padrão: 0.5 (50%)
-```
-
-### Alterar resolução ou FPS
-
-No `.env`:
-```env
-CAMERA_WIDTH=1280
-CAMERA_HEIGHT=720
-CAMERA_FPS=15
-```
-
-> Resoluções maiores aumentam o uso de CPU para detecção e mais espaço em disco.
-
-### Espaço em disco
-
-A taxa de gravação é aproximadamente:
-
-```
-640×480 @ 10fps ≈ 20 KB/frame × 10 fps = 200 KB/s = ~17 GB/dia
-```
-
-Ajuste `FRAME_RETENTION_HOURS` conforme o espaço disponível. A limpeza automática roda a cada hora.
-
----
-
-## Parando tudo
+## Stopping
 
 ```powershell
-# Aplicação Node.js: Ctrl+C no terminal
+# Stop Node.js: Ctrl+C
 
-# Banco de dados
+# Stop and remove database container
 docker compose down
 
-# Remover dados do banco (irreversível)
+# Also delete all database data
 docker compose down -v
 ```
 
 ---
 
-## Solução de problemas
+## Troubleshooting
 
-| Problema | Causa provável | Solução |
+| Problem | Likely cause | Fix |
 |---|---|---|
-| `Could not connect to PostgreSQL` | Docker não iniciado | `docker compose up -d` |
-| `Failed to start ffmpeg` | FFmpeg não está no PATH | Instalar FFmpeg e reiniciar o terminal |
-| `dshow: Could not find video device` | Nome errado em `CAMERA_DEVICE` | Reexecutar `ffmpeg -list_devices true -f dshow -i dummy 2>&1` |
-| Stream lento / FPS baixo | Detecção consumindo CPU | Aumentar `DETECTION_SKIP` em `pipeline.js` |
-| Modelo COCO-SSD não carrega | Sem internet na primeira execução | Conectar à internet e reiniciar |
+| `Could not connect to PostgreSQL` | Docker not running | `docker compose up -d` |
+| `Failed to start ffmpeg` | FFmpeg not in PATH | Reinstall FFmpeg, restart terminal |
+| `dshow: Could not find video device` | Wrong device name | Re-run the `ffmpeg -list_devices` command |
+| Stream slow / low FPS | High CPU from inference | Increase `DETECTION_SKIP` in `src/capture/pipeline.js` |
+| COCO-SSD fails to load | No internet on first run | Connect to internet and restart |
+
+---
+
+## License
+
+MIT

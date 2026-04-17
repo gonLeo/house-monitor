@@ -32,7 +32,6 @@ async function main() {
   console.log('╚══════════════════════════════════╝');
 
   // Ensure storage directories exist
-  fs.mkdirSync(config.framesDir,    { recursive: true });
   fs.mkdirSync(config.snapshotsDir, { recursive: true });
   fs.mkdirSync(config.audioDir,     { recursive: true });
   fs.mkdirSync(config.segmentsDir,  { recursive: true });
