@@ -12,12 +12,13 @@ function getDateString(d) {
 }
 
 function getSegmentName(d) {
-  return `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}-${ms}`;
 }
 
 /**
  * Records incoming MJPEG frames as H.264 .mp4 segments.
- * Segments are stored as: segments/<YYYY-MM-DD>/<HH-MM-SS>.mp4
+ * Segments are stored as: segments/<YYYY-MM-DD>/<HH-MM-SS-mmm>.mp4
  *
  * Each segment runs for config.segmentDurationSeconds wall-clock seconds,
  * then ffmpeg is gracefully closed (stdin EOF) and a new process is spawned.

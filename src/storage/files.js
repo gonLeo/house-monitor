@@ -32,13 +32,15 @@ async function saveSnapshot(jpegBuffer, eventId) {
 /**
  * Parse a date from the directory/filename structure used by VideoSegmentRecorder.
  * dateDir  : "YYYY-MM-DD"
- * fileName : "HH-MM-SS.mp4"
+ * fileName : "HH-MM-SS.mp4" (legacy) or "HH-MM-SS-mmm.mp4" (current)
  */
 function parseSegmentDate(dateDir, fileName) {
   try {
     const [y, mo, d] = dateDir.split('-').map(Number);
-    const [h, mi, s] = fileName.replace('.mp4', '').split('-').map(Number);
-    return new Date(y, mo - 1, d, h, mi, s, 0);
+    const parts = fileName.replace('.mp4', '').split('-').map(Number);
+    const [h, mi, s] = parts;
+    const ms = parts.length >= 4 ? parts[3] : 0;
+    return new Date(y, mo - 1, d, h, mi, s, ms);
   } catch {
     return null;
   }
@@ -89,13 +91,15 @@ function getVideoSegmentsInRange(startTime, endTime) {
 /**
  * Parse a segment start Date from the audio directory structure.
  * dateDir  : "YYYY-MM-DD"
- * fileName : "HH-MM-SS.m4a"
+ * fileName : "HH-MM-SS.m4a" (legacy) or "HH-MM-SS-mmm.m4a" (current)
  */
 function parseSegmentStart(dateDir, fileName) {
   try {
     const [y, mo, d] = dateDir.split('-').map(Number);
-    const [h, mi, s] = fileName.replace('.m4a', '').split('-').map(Number);
-    return new Date(y, mo - 1, d, h, mi, s, 0);
+    const parts = fileName.replace('.m4a', '').split('-').map(Number);
+    const [h, mi, s] = parts;
+    const ms = parts.length >= 4 ? parts[3] : 0;
+    return new Date(y, mo - 1, d, h, mi, s, ms);
   } catch {
     return null;
   }

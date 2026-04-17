@@ -51,7 +51,10 @@ async function generate(startTime, endTime, res) {
     for (const seg of audioSegments) {
       const absPath  = path.resolve(seg.filePath).replace(/\\/g, '/');
       const inpoint  = Math.max(0, (clipStart.getTime() - seg.segStart.getTime()) / 1000);
-      const outpoint = (clipEnd.getTime() - seg.segStart.getTime()) / 1000;
+      const outpoint = Math.min(
+        (seg.segEnd.getTime() - seg.segStart.getTime()) / 1000,
+        (clipEnd.getTime()   - seg.segStart.getTime()) / 1000,
+      );
       audioLines.push(`file '${absPath}'`);
       if (inpoint  > 0.01) audioLines.push(`inpoint ${inpoint.toFixed(3)}`);
       audioLines.push(`outpoint ${outpoint.toFixed(3)}`);

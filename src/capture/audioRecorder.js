@@ -12,14 +12,23 @@ function getDateString(d) {
 }
 
 function getSegmentName(d) {
-  return `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}-${ms}`;
 }
 
 /**
  * Records audio from a DirectShow microphone in fixed-duration segments.
- * Segments are stored as: audio/<YYYY-MM-DD>/<HH-MM-SS>.m4a
+ * Segments are stored as: audio/<YYYY-MM-DD>/<HH-MM-SS-mmm>.m4a
  *
  * Disabled automatically when config.audio.device is empty.
+ *
+ * Rotation is self-managed via the ffmpeg -t flag: each ffmpeg process runs for
+ * exactly segmentSeconds of audio samples, then exits cleanly (writing the moov
+ * atom). The next segment spawns immediately in the 'close' handler.
+ *
+ * NOTE: stdin.end() does NOT stop a DirectShow-capturing ffmpeg on Windows
+ * because dshow ignores stdin EOF. Using -t is the only reliable way to
+ * ensure the moov atom is written and the file is valid for later use.
  */
 class AudioRecorder {
   constructor() {
