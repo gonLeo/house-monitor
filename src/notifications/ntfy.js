@@ -43,6 +43,15 @@ class NtfyNotifier {
     }
   }
 
+  setEnabled(val) {
+    this.enabled = Boolean(val);
+    console.log(`[Ntfy] ${this.enabled ? 'Enabled' : 'Disabled'}`);
+  }
+
+  isEnabled() {
+    return this.enabled;
+  }
+
   /**
    * Low-level fire-and-forget POST to ntfy.sh.
    * Errors are logged as warnings and never propagated.

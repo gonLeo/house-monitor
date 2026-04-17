@@ -5,6 +5,7 @@ const path   = require('path');
 const clips  = require('./clips');
 const config = require('../config');
 const alarm  = require('../alarm');
+const ntfy   = require('../notifications/ntfy');
 
 function setup(app, db, connectivity, camera) {
 
@@ -94,6 +95,23 @@ function setup(app, db, connectivity, camera) {
     }
     alarm.setEnabled(enabled);
     res.json({ enabled: alarm.isEnabled() });
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/notifications  — returns notifications enabled state
+  // POST /api/notifications — sets notifications enabled state { enabled: true|false }
+  // ------------------------------------------------------------------
+  app.get('/api/notifications', (req, res) => {
+    res.json({ enabled: ntfy.isEnabled() });
+  });
+
+  app.post('/api/notifications', (req, res) => {
+    const { enabled } = req.body ?? {};
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'Body must be { "enabled": true|false }' });
+    }
+    ntfy.setEnabled(enabled);
+    res.json({ enabled: ntfy.isEnabled() });
   });
 
   // ------------------------------------------------------------------

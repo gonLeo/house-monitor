@@ -72,6 +72,27 @@ alarmToggle.addEventListener('change', async () => {
   } catch {}
 });
 
+// ── Notifications feature flag ────────────────────────────────
+const notificationsToggle = document.getElementById('notifications-enabled');
+
+async function fetchNotificationsState() {
+  try {
+    const res = await fetch('/api/notifications');
+    const { enabled } = await res.json();
+    notificationsToggle.checked = enabled;
+  } catch {}
+}
+
+notificationsToggle.addEventListener('change', async () => {
+  try {
+    await fetch('/api/notifications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: notificationsToggle.checked }),
+    });
+  } catch {}
+});
+
 // ── Detection notification ────────────────────────────────────
 let flashTimer = null;
 
@@ -326,6 +347,7 @@ connectWs();
 loadEvents();
 loadConnectivity();
 fetchAlarmState();
+fetchNotificationsState();
 
 setInterval(loadConnectivity, 30000);
 setInterval(() => {
