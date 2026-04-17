@@ -98,7 +98,7 @@ class NtfyNotifier {
   personDetected({ confidence }) {
     const now = new Date();
     this._send({
-      title:    'ALERTA DE PRESENÇA DETECTADA',
+      title:    'PRESENCA DETECTADA', // title não pode ter acento
       priority: 'high',
       tags:     ['police_car_light', 'house'],
       body:
@@ -116,7 +116,7 @@ class NtfyNotifier {
   cameraDisconnected() {
     const now = new Date();
     this._send({
-      title:    'CÂMERA DESCONECTADA',
+      title:    'CAMERA DESCONECTADA',
       priority: 'high',
       tags:     ['warning', 'camera_with_flash'],
       body:
@@ -134,7 +134,7 @@ class NtfyNotifier {
   cameraReconnected({ downtimeMs }) {
     const now = new Date();
     this._send({
-      title:    'CÂMERA RECONECTADA',
+      title:    'CAMERA RECONECTADA',
       priority: 'default',
       tags:     ['white_check_mark', 'camera_with_flash'],
       body:
@@ -151,7 +151,7 @@ class NtfyNotifier {
   connectivityLost() {
     const now = new Date();
     this._send({
-      title:    'CONEXÃO COM INTERNET PERDIDA',
+      title:    'CONEXAO COM INTERNET PERDIDA',
       priority: 'high',
       tags:     ['warning', 'globe_with_meridians'],
       body:
@@ -186,7 +186,7 @@ class NtfyNotifier {
     }
 
     this._send({
-      title:    'CONEXÃO RESTAURADA',
+      title:    'CONEXAO RESTAURADA',
       priority: 'default',
       tags:     ['globe_with_meridians', 'white_check_mark'],
       body,
@@ -207,7 +207,7 @@ class NtfyNotifier {
     const avgBytesPerDay = retentionDays > 0 ? removedBytes / retentionDays : removedBytes;
 
     this._send({
-      title:    'LIMPEZA AUTOMÁTICA REALIZADA',
+      title:    'LIMPEZA AUTOMATICA REALIZADA',
       priority: 'low',
       tags:     ['broom', 'floppy_disk'],
       body:
