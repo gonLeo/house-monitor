@@ -23,6 +23,7 @@ const storage       = require('./storage/files');
 const cleanup       = require('./storage/cleanup');
 const AudioRecorder = require('./capture/audioRecorder');
 const { createServer } = require('./api/server');
+const ntfy = require('./notifications/ntfy');
 
 async function main() {
   console.log('╔══════════════════════════════════╗');
@@ -64,6 +65,11 @@ async function main() {
 
   // 7. Wire camera → pipeline
   pipeline.start({ camera, wsServer, detector, presenceTracker, videoRecorder, db, storage });
+
+  // Wire camera disconnect/reconnect notifications
+  camera.on('disconnected', () => ntfy.cameraDisconnected());
+  camera.on('reconnected',  ({ downtimeMs }) => ntfy.cameraReconnected({ downtimeMs }));
+
   camera.start();
   audioRecorder.start();
   videoRecorder.start();

@@ -12,6 +12,7 @@ const FRAME_SAVE_SKIP = 2; // 30fps / 2 = 15fps to encoder
 const MIN_CONFIDENCE = 0.5;
 
 const alarm = require('../alarm');
+const ntfy  = require('../notifications/ntfy');
 
 let _frameCounter = 0;
 let _isDetecting  = false;
@@ -73,6 +74,8 @@ function start({ camera, wsServer, detector, presenceTracker, videoRecorder, db,
           );
 
           alarm.play();
+
+          ntfy.personDetected({ confidence: person.score });
 
           wsServer.broadcast({
             type: 'detection',

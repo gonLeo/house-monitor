@@ -4,13 +4,23 @@ const fs   = require('fs');
 const path = require('path');
 const cron = require('node-cron');
 const config = require('../config');
+const ntfy   = require('../notifications/ntfy');
 
 function start() {
   // Run every hour at minute 0
   cron.schedule('0 * * * *', () => {
-    cleanOldSegments();
-    cleanOldAudio();
+    const seg   = cleanOldSegments();
+    const audio = cleanOldAudio();
     cleanOldLogs();
+
+    const totalBytes = seg.bytes + audio.bytes;
+    const totalFiles = seg.files + audio.files;
+
+    ntfy.cleanupDone({
+      removedBytes:  totalBytes,
+      filesCount:    totalFiles,
+      retentionHours: config.retentionHours,
+    });
   });
   console.log(
     `[Cleanup] Scheduled hourly cleanup (retention: ${config.retentionHours}h).`
@@ -19,11 +29,12 @@ function start() {
 
 function cleanOldSegments() {
   const segDir = config.segmentsDir;
-  if (!fs.existsSync(segDir)) return;
+  if (!fs.existsSync(segDir)) return { bytes: 0, files: 0 };
 
   const cutoff     = new Date(Date.now() - config.retentionHours * 3600 * 1000);
   const segSeconds = config.segmentDurationSeconds;
   let deletedCount = 0;
+  let deletedBytes = 0;
 
   for (const dateDir of fs.readdirSync(segDir)) {
     const dirPath = path.join(segDir, dateDir);
@@ -33,7 +44,12 @@ function cleanOldSegments() {
     const dirEnd = new Date(dateDir + 'T23:59:59.999');
     if (dirEnd < cutoff) {
       for (const file of fs.readdirSync(dirPath)) {
-        try { fs.unlinkSync(path.join(dirPath, file)); deletedCount++; } catch { /* ignore */ }
+        const filePath = path.join(dirPath, file);
+        try {
+          deletedBytes += fs.statSync(filePath).size;
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        } catch { /* ignore */ }
       }
       try { fs.rmdirSync(dirPath); } catch { /* ignore */ }
       continue;
@@ -47,7 +63,12 @@ function cleanOldSegments() {
       if (isNaN(segStart.getTime())) continue;
       const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
       if (segEnd < cutoff) {
-        try { fs.unlinkSync(path.join(dirPath, fileName)); deletedCount++; } catch { /* ignore */ }
+        const filePath = path.join(dirPath, fileName);
+        try {
+          deletedBytes += fs.statSync(filePath).size;
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        } catch { /* ignore */ }
       }
     }
   }
@@ -55,14 +76,16 @@ function cleanOldSegments() {
   if (deletedCount > 0) {
     console.log(`[Cleanup] Deleted ${deletedCount} old video segment(s).`);
   }
+  return { bytes: deletedBytes, files: deletedCount };
 }
 
 function cleanOldAudio() {
   const audioDir = config.audioDir;
-  if (!audioDir || !fs.existsSync(audioDir)) return;
+  if (!audioDir || !fs.existsSync(audioDir)) return { bytes: 0, files: 0 };
 
-    const cutoff = new Date(Date.now() - config.retentionHours * 3600 * 1000);
+  const cutoff = new Date(Date.now() - config.retentionHours * 3600 * 1000);
   let deletedCount = 0;
+  let deletedBytes = 0;
 
   for (const dateDir of fs.readdirSync(audioDir)) {
     const dirPath = path.join(audioDir, dateDir);
@@ -71,7 +94,12 @@ function cleanOldAudio() {
     const dirEnd = new Date(dateDir + 'T23:59:59.999');
     if (dirEnd < cutoff) {
       for (const file of fs.readdirSync(dirPath)) {
-        try { fs.unlinkSync(path.join(dirPath, file)); deletedCount++; } catch { /* ignore */ }
+        const filePath = path.join(dirPath, file);
+        try {
+          deletedBytes += fs.statSync(filePath).size;
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        } catch { /* ignore */ }
       }
       try { fs.rmdirSync(dirPath); } catch { /* ignore */ }
       continue;
@@ -84,7 +112,12 @@ function cleanOldAudio() {
       const fileDate = new Date(y, mo - 1, d, h, mi, s, 0);
       if (isNaN(fileDate.getTime())) continue;
       if (fileDate < cutoff) {
-        try { fs.unlinkSync(path.join(dirPath, fileName)); deletedCount++; } catch { /* ignore */ }
+        const filePath = path.join(dirPath, fileName);
+        try {
+          deletedBytes += fs.statSync(filePath).size;
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        } catch { /* ignore */ }
       }
     }
   }
@@ -92,6 +125,7 @@ function cleanOldAudio() {
   if (deletedCount > 0) {
     console.log(`[Cleanup] Deleted ${deletedCount} old audio segment(s).`);
   }
+  return { bytes: deletedBytes, files: deletedCount };
 }
 
 function cleanOldLogs() {

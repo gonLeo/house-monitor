@@ -16,11 +16,14 @@ const MAX_RECONNECT_DELAY_MS = 30000;
 class CameraCapture extends EventEmitter {
   constructor() {
     super();
-    this._process       = null;
-    this._buffer        = Buffer.alloc(0);
-    this.running        = false;
-    this._reconnectDelay = 1000;
-    this._reconnectTimer = null;
+    this._process         = null;
+    this._buffer          = Buffer.alloc(0);
+    this.running          = false;
+    this._reconnectDelay  = 1000;
+    this._reconnectTimer  = null;
+    // Disconnect / reconnect tracking
+    this._isDisconnected  = false;
+    this._disconnectedAt  = null;
   }
 
   start() {
@@ -71,7 +74,13 @@ class CameraCapture extends EventEmitter {
       if (!this.running) return;
 
       console.warn(`[Camera] ffmpeg exited (code ${code}). Reconnecting in ${this._reconnectDelay}ms…`);
-      this.emit('disconnected');
+
+      // Emit 'disconnected' only once per outage (not on every retry)
+      if (!this._isDisconnected) {
+        this._isDisconnected = true;
+        this._disconnectedAt = new Date();
+        this.emit('disconnected');
+      }
 
       this._reconnectTimer = setTimeout(() => {
         this._reconnectDelay = Math.min(this._reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
@@ -111,6 +120,15 @@ class CameraCapture extends EventEmitter {
 
       // Successful parse resets reconnect backoff
       this._reconnectDelay = 1000;
+
+      // First successful frame after a disconnect → emit 'reconnected'
+      if (this._isDisconnected) {
+        const downtimeMs    = this._disconnectedAt ? Date.now() - this._disconnectedAt.getTime() : 0;
+        this._isDisconnected = false;
+        this._disconnectedAt = null;
+        this.emit('reconnected', { downtimeMs });
+      }
+
       this.emit('frame', Buffer.from(frame)); // copy so buffer can be sliced freely
     }
   }

@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const path      = require('path');
 
 const ALARM_PATH = path.join(__dirname, 'public', 'alarm.mp3');
-const REPEATS    = 4;
+const REPEATS    = 1;
 
 let _enabled = true;
 

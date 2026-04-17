@@ -36,4 +36,6 @@ module.exports = {
   segmentFps:              parseInt(process.env.SEGMENT_FPS                || '15',   10),
   retentionHours:          parseInt(process.env.RETENTION_HOURS            || '12',   10),
   logsDir:                 process.env.LOGS_DIR                            || './logs',
+  // ntfy.sh push notifications — set to your topic string, leave empty to disable.
+  ntfyTopic:               process.env.NTFY_TOPIC                          || '',
 };

@@ -2,6 +2,7 @@
 
 const dns = require('dns');
 const { promisify } = require('util');
+const ntfy = require('../notifications/ntfy');
 
 const dnsResolve = promisify(dns.resolve);
 const CHECK_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
@@ -52,6 +53,7 @@ class ConnectivityMonitor {
 
     if (newStatus === 'offline') {
       console.warn('[Connectivity] Internet connection lost. Events will continue to be recorded locally.');
+      ntfy.connectivityLost();
     }
 
     if (newStatus === 'online' && previous === 'offline') {
@@ -64,19 +66,22 @@ class ConnectivityMonitor {
       const lastOffline = await this._db.getLastOfflineEntry();
       if (!lastOffline) return;
 
-      const offlineStart = new Date(lastOffline.timestamp);
-      const now = new Date();
-      const durationMs = now - offlineStart;
-      const durationMin = Math.round(durationMs / 60000);
+      const offlineStart    = new Date(lastOffline.timestamp);
+      const now             = new Date();
+      const offlineDurationMs = now - offlineStart;
+      const durationMin     = Math.round(offlineDurationMs / 60000);
 
-      const eventCount = await this._db.countEventsInPeriod(offlineStart, now);
+      // Fetch the actual events recorded during the outage
+      const events = await this._db.getEvents({ startTime: offlineStart, endTime: now });
 
       console.log(
         `[Connectivity] ✓ Connection restored!\n` +
         `  Offline period : ${offlineStart.toISOString()} → ${now.toISOString()}\n` +
         `  Duration       : ~${durationMin} minute(s)\n` +
-        `  Events recorded: ${eventCount}`
+        `  Events recorded: ${events.length}`
       );
+
+      ntfy.connectivityRestored({ offlineDurationMs, events });
 
       await this._db.insertEvent({
         type:         'connection_restored',
