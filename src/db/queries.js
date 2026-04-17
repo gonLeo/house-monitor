@@ -99,6 +99,11 @@ async function getLastEvent() {
   return result.rows[0] || null;
 }
 
+async function countAllEvents() {
+  const result = await pool.query('SELECT COUNT(*) FROM events');
+  return parseInt(result.rows[0].count, 10);
+}
+
 async function deleteAllEvents() {
   const result = await pool.query('DELETE FROM events');
   return result.rowCount;
@@ -120,6 +125,7 @@ module.exports = {
   getLastOfflineEntry,
   countEventsInPeriod,
   getLastEvent,
+  countAllEvents,
   deleteAllEvents,
   deleteAllConnectivityLogs,
 };

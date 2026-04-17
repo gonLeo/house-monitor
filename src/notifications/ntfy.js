@@ -194,6 +194,25 @@ class NtfyNotifier {
   }
 
   /**
+   * Fired when total storage usage reaches or exceeds 25 GB.
+   * @param {{ totalBytes: number, eventCount: number }} opts
+   */
+  storageWarning({ totalBytes, eventCount }) {
+    const now = new Date();
+    this._send({
+      title:    'AVISO: ARMAZENAMENTO ELEVADO',
+      priority: 'high',
+      tags:     ['warning', 'floppy_disk'],
+      body:
+        `💾 Uso de armazenamento atingiu ${formatBytes(totalBytes)}!\n\n` +
+        `⏰ Data/Hora: ${formatDateTime(now)}\n` +
+        `📦 Armazenamento atual: ${formatBytes(totalBytes)}\n` +
+        `📋 Eventos registrados: ${eventCount}\n\n` +
+        `⚠️ Considere liberar espaço ou aumentar a capacidade.`,
+    });
+  }
+
+  /**
    * Fired after the hourly cleanup job removes old files.
    * Skipped silently if nothing was actually deleted.
    *

@@ -7,11 +7,14 @@ const config = require('../config');
 const alarm   = require('../alarm');
 const ntfy    = require('../notifications/ntfy');
 const cleanup = require('../storage/cleanup');
+const db      = require('../db/queries');
 
 // ── Storage usage cache ───────────────────────────────────────────────────────
 const STORAGE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const STORAGE_WARN_BYTES   = 25 * 1024 ** 3;  // 25 GB
 
-let _storageCache = null; // { totalBytes, byDir, calculatedAt }
+let _storageCache     = null;  // { totalBytes, byDir, calculatedAt }
+let _storageAlertSent = false; // true while usage stays >= 25 GB
 
 function dirSizeSync(dirPath) {
   if (!fs.existsSync(dirPath)) return 0;
@@ -43,7 +46,24 @@ function computeStorageUsage() {
     totalBytes += bytes;
   }
   _storageCache = { totalBytes, byDir, calculatedAt: new Date().toISOString() };
+  checkStorageThreshold(totalBytes);
   return _storageCache;
+}
+
+async function checkStorageThreshold(totalBytes) {
+  if (totalBytes >= STORAGE_WARN_BYTES) {
+    if (!_storageAlertSent) {
+      _storageAlertSent = true;
+      try {
+        const eventCount = await db.countAllEvents();
+        ntfy.storageWarning({ totalBytes, eventCount });
+      } catch (err) {
+        console.warn('[Storage] Falha ao enviar alerta de armazenamento:', err.message);
+      }
+    }
+  } else {
+    _storageAlertSent = false;
+  }
 }
 
 function startStorageCacheRefresh() {
