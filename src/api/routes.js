@@ -4,8 +4,52 @@ const fs     = require('fs');
 const path   = require('path');
 const clips  = require('./clips');
 const config = require('../config');
-const alarm  = require('../alarm');
-const ntfy   = require('../notifications/ntfy');
+const alarm   = require('../alarm');
+const ntfy    = require('../notifications/ntfy');
+const cleanup = require('../storage/cleanup');
+
+// ── Storage usage cache ───────────────────────────────────────────────────────
+const STORAGE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+let _storageCache = null; // { totalBytes, byDir, calculatedAt }
+
+function dirSizeSync(dirPath) {
+  if (!fs.existsSync(dirPath)) return 0;
+  let total = 0;
+  for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+    const full = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      total += dirSizeSync(full);
+    } else {
+      try { total += fs.statSync(full).size; } catch { /* ignore */ }
+    }
+  }
+  return total;
+}
+
+function computeStorageUsage() {
+  const dirs = {
+    'Segmentos': config.segmentsDir,
+    'Frames':    config.framesDir,
+    'Audio':     config.audioDir,
+    'Snapshots': config.snapshotsDir,
+    'Logs':      config.logsDir,
+  };
+  const byDir = {};
+  let totalBytes = 0;
+  for (const [label, dirPath] of Object.entries(dirs)) {
+    const bytes = dirSizeSync(path.resolve(process.cwd(), dirPath));
+    byDir[label] = bytes;
+    totalBytes += bytes;
+  }
+  _storageCache = { totalBytes, byDir, calculatedAt: new Date().toISOString() };
+  return _storageCache;
+}
+
+function startStorageCacheRefresh() {
+  computeStorageUsage(); // initial
+  setInterval(computeStorageUsage, STORAGE_CACHE_TTL_MS);
+}
 
 function setup(app, db, connectivity, camera) {
 
@@ -53,6 +97,7 @@ function setup(app, db, connectivity, camera) {
         connectivity:       connectivity.getStatus(),
         cameraRunning:      camera.running,
         uptimeSeconds:      Math.floor(process.uptime()),
+        retentionHours:     config.retentionHours,
         lastEvent,
         connectivityHistory,
       });
@@ -115,6 +160,28 @@ function setup(app, db, connectivity, camera) {
   });
 
   // ------------------------------------------------------------------
+  // GET /api/storage-usage  — returns disk usage across monitored dirs
+  // POST /api/storage-usage/refresh — forces an immediate recount
+  // ------------------------------------------------------------------
+  app.get('/api/storage-usage', (req, res) => {
+    res.json(_storageCache || computeStorageUsage());
+  });
+
+  app.post('/api/storage-usage/refresh', (req, res) => {
+    res.json(computeStorageUsage());
+  });
+
+  // ------------------------------------------------------------------
+  // POST /api/cleanup/run — triggers an immediate cleanup (same as cron)
+  // ------------------------------------------------------------------
+  app.post('/api/cleanup/run', (req, res) => {
+    const result = cleanup.runCleanupNow();
+    // Refresh storage cache right after so the UI reflects the freed space
+    computeStorageUsage();
+    res.json(result);
+  });
+
+  // ------------------------------------------------------------------
   // GET /api/logs  — returns the application log file as plain text
   // ------------------------------------------------------------------
   app.get('/api/logs', (req, res) => {
@@ -127,4 +194,4 @@ function setup(app, db, connectivity, camera) {
   });
 }
 
-module.exports = { setup };
+module.exports = { setup, startStorageCacheRefresh };

@@ -342,14 +342,91 @@ function buildClipLink() {
   link.style.display = 'block';
 }
 
+// ── Storage usage ─────────────────────────────────────────────
+function formatBytes(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(2)} MB`;
+  return `${(bytes / 1024).toFixed(2)} KB`;
+}
+
+function renderStorageUsage(data) {
+  document.getElementById('storage-total').textContent = formatBytes(data.totalBytes);
+  const d = new Date(data.calculatedAt);
+  document.getElementById('storage-ts').textContent =
+    `atualizado ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+async function fetchStorageUsage() {
+  try {
+    const r = await fetch('/api/storage-usage');
+    renderStorageUsage(await r.json());
+  } catch {}
+}
+
+async function refreshStorageUsage() {
+  document.getElementById('storage-total').textContent = '…';
+  document.getElementById('storage-ts').textContent = '';
+  try {
+    const r = await fetch('/api/storage-usage/refresh', { method: 'POST' });
+    renderStorageUsage(await r.json());
+  } catch {}
+}
+
+// ── Cleanup modal ─────────────────────────────────────
+function openCleanupModal() {
+  document.getElementById('cleanup-result').style.display = 'none';
+  document.getElementById('cleanup-confirm-btn').disabled = false;
+  document.getElementById('cleanup-confirm-btn').textContent = 'Confirmar limpeza';
+  // Fetch current retention config from /status to display in warning text
+  fetch('/status').then(r => r.json()).then(data => {
+    const hours = data.retentionHours;
+    if (hours) {
+      const label = hours >= 24 ? `${hours / 24}d` : `${hours}h`;
+      document.getElementById('cleanup-retention-label').textContent = label;
+    }
+  }).catch(() => {});
+  document.getElementById('cleanup-modal-overlay').classList.add('open');
+}
+
+function closeCleanupModal() {
+  document.getElementById('cleanup-modal-overlay').classList.remove('open');
+}
+
+async function confirmCleanup() {
+  const btn = document.getElementById('cleanup-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Limpando…';
+  const resultEl = document.getElementById('cleanup-result');
+  resultEl.style.display = 'none';
+  try {
+    const r = await fetch('/api/cleanup/run', { method: 'POST' });
+    const { removedBytes, filesCount } = await r.json();
+    resultEl.style.display = 'block';
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent =
+      `✅ Limpeza concluída: ${filesCount} arquivo(s) removido(s) (${formatBytes(removedBytes)}).`;
+    // Refresh storage badge
+    fetchStorageUsage();
+    btn.textContent = 'Concluído';
+  } catch {
+    resultEl.style.display = 'block';
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = '❌ Erro ao executar limpeza. Verifique os logs.';
+    btn.disabled = false;
+    btn.textContent = 'Confirmar limpeza';
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────
 connectWs();
 loadEvents();
 loadConnectivity();
 fetchAlarmState();
 fetchNotificationsState();
+fetchStorageUsage();
 
 setInterval(loadConnectivity, 30000);
+setInterval(fetchStorageUsage, 30 * 60 * 1000);
 setInterval(() => {
   const s = document.getElementById('filter-start').value;
   const e = document.getElementById('filter-end').value;

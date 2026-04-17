@@ -75,6 +75,17 @@
               </div>
             </label>
 
+            <div class="ops-divider"></div>
+
+            <!-- Storage usage -->
+            <div class="storage-usage">
+              <span class="ops-lbl">💾 Armazenamento</span>
+              <span class="ops-val" id="storage-total">—</span>
+              <span class="storage-ts" id="storage-ts"></span>
+              <button class="btn-storage-refresh" onclick="refreshStorageUsage()" title="Recalcular agora">↺</button>
+              <button class="btn-cleanup" onclick="openCleanupModal()" title="Limpar arquivos antigos agora">🗑️ Limpar tudo</button>
+            </div>
+
             <!-- Logs -->
             <a href="/api/logs" target="_blank" class="btn-logs">📋 Logs</a>
 
@@ -162,6 +173,30 @@
         <div class="spinner"></div><br>Gerando clipe…
       </div>
       <video id="clip-modal-video" controls></video>
+    </div>
+  </div>
+
+  <!-- Cleanup confirmation modal -->
+  <div class="clip-modal-overlay" id="cleanup-modal-overlay">
+    <div class="clip-modal" style="max-width:420px">
+      <div class="clip-modal-header">
+        <h3>🗑️ Limpar arquivos antigos</h3>
+        <button class="btn-secondary" onclick="closeCleanupModal()">✕ Fechar</button>
+      </div>
+      <div style="padding:20px 24px;">
+        <p style="margin:0 0 12px;line-height:1.6">
+          Esta ação vai remover <strong>todos os vídeos, áudios e frames</strong> mais antigos que
+          <strong id="cleanup-retention-label">—</strong>, seguindo a mesma regra da limpeza automática.
+        </p>
+        <p style="margin:0 0 20px;color:var(--red);font-size:13px;line-height:1.5">
+          ⚠️ O histórico de gravações será removido permanentemente. Os eventos no banco de dados <em>não</em> são apagados.
+        </p>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button class="btn-secondary" onclick="closeCleanupModal()">Cancelar</button>
+          <button class="btn-danger" id="cleanup-confirm-btn" onclick="confirmCleanup()">Confirmar limpeza</button>
+        </div>
+        <div id="cleanup-result" style="margin-top:14px;font-size:13px;display:none"></div>
+      </div>
     </div>
   </div>
 

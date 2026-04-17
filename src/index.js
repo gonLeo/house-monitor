@@ -23,6 +23,7 @@ const storage       = require('./storage/files');
 const cleanup       = require('./storage/cleanup');
 const AudioRecorder = require('./capture/audioRecorder');
 const { createServer } = require('./api/server');
+const { startStorageCacheRefresh } = require('./api/routes');
 const ntfy = require('./notifications/ntfy');
 
 async function main() {
@@ -61,6 +62,7 @@ async function main() {
 
   // 6. Start background services
   cleanup.start();
+  startStorageCacheRefresh();
   connectivity.start(db);
 
   // 7. Wire camera → pipeline

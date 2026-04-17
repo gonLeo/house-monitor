@@ -153,4 +153,23 @@ function cleanOldLogs() {
   } catch { /* ignore */ }
 }
 
-module.exports = { start };
+function runCleanupNow() {
+  const seg   = cleanOldSegments();
+  const audio = cleanOldAudio();
+  cleanOldLogs();
+
+  const totalBytes = seg.bytes + audio.bytes;
+  const totalFiles = seg.files + audio.files;
+
+  console.log(`[Cleanup] Manual cleanup triggered: ${totalFiles} file(s) removed.`);
+
+  ntfy.cleanupDone({
+    removedBytes:   totalBytes,
+    filesCount:     totalFiles,
+    retentionHours: config.retentionHours,
+  });
+
+  return { removedBytes: totalBytes, filesCount: totalFiles };
+}
+
+module.exports = { start, runCleanupNow };
