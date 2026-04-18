@@ -7,7 +7,7 @@ const PREVIEW_FRAME_SKIP = 3;
 
 class WsServer {
   constructor(httpServer) {
-    this.wss = new WebSocketServer({ server: httpServer });
+    this.wss = new WebSocketServer({ server: httpServer, perMessageDeflate: false });
     this._frameCount = 0;
     this._lastFrameCount = 0;
     this._previewFrameCounter = 0;
@@ -43,18 +43,18 @@ class WsServer {
   }
 
   /**
-   * Broadcast a JPEG frame as base64. Tracks FPS.
-   * @param {string} base64
+   * Broadcast a raw JPEG preview frame. Tracks FPS.
+   * Sending binary JPEGs avoids the CPU and bandwidth overhead of base64.
+   * @param {Buffer} jpegBuffer
    */
-  broadcastFrame(base64) {
+  broadcastFrame(jpegBuffer) {
     this._frameCount++;
     if (this.wss.clients.size === 0) return;
 
     this._previewFrameCounter++;
     if (this._previewFrameCounter % PREVIEW_FRAME_SKIP !== 0) return;
 
-    const data = JSON.stringify({ type: 'frame', data: base64 });
-    this._sendToAll(data);
+    this._sendBinaryToAll(jpegBuffer);
   }
 
   /**
@@ -67,7 +67,7 @@ class WsServer {
     this._sendToAll(data);
   }
 
-  _sendToAll(data) {
+  _sendBinaryToAll(buffer) {
     for (const client of this.wss.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
 
@@ -83,7 +83,24 @@ class WsServer {
       client._backpressureLogged = false;
 
       try {
-        client.send(data, (err) => {
+        client.send(buffer, { binary: true, compress: false }, (err) => {
+          if (err && err.code !== 'ECONNRESET' && err.code !== 'ERR_STREAM_DESTROYED') {
+            console.warn('[WS] Send error:', err.message);
+          }
+        });
+      } catch (err) {
+        console.warn('[WS] Unexpected send failure:', err.message);
+        try { client.terminate(); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  _sendToAll(data) {
+    for (const client of this.wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      try {
+        client.send(data, { compress: false }, (err) => {
           if (err && err.code !== 'ECONNRESET' && err.code !== 'ERR_STREAM_DESTROYED') {
             console.warn('[WS] Send error:', err.message);
           }

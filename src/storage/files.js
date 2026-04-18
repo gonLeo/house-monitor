@@ -74,13 +74,18 @@ function getVideoSegmentsInRange(startTime, endTime) {
 
     for (const fileName of fs.readdirSync(dirPath).sort()) {
       if (!fileName.endsWith('.mp4')) continue;
+      const filePath = path.join(dirPath, fileName);
+      let stat;
+      try { stat = fs.statSync(filePath); } catch { continue; }
+      if (!stat.isFile() || stat.size < 1024) continue;
+
       const segStart = parseSegmentDate(dateDir, fileName);
       if (!segStart) continue;
       const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
-      // Skip segments still being recorded
-      if (segEnd > now) continue;
+      // Skip segments still being recorded or still being finalised by ffmpeg.
+      if (segEnd > now || (now.getTime() - stat.mtimeMs) < 5000) continue;
       if (segEnd > start && segStart < end) {
-        segments.push({ filePath: path.join(dirPath, fileName), segStart, segEnd });
+        segments.push({ filePath, segStart, segEnd });
       }
     }
   }
@@ -132,13 +137,18 @@ function getAudioSegmentsInRange(startTime, endTime) {
 
     for (const fileName of fs.readdirSync(dirPath).sort()) {
       if (!fileName.endsWith('.m4a')) continue;
+      const filePath = path.join(dirPath, fileName);
+      let stat;
+      try { stat = fs.statSync(filePath); } catch { continue; }
+      if (!stat.isFile() || stat.size < 1024) continue;
+
       const segStart = parseSegmentStart(dateDir, fileName);
       if (!segStart) continue;
       const segEnd = new Date(segStart.getTime() + segSeconds * 1000);
       // Skip segments still being recorded — moov atom not written until ffmpeg closes the file
-      if (segEnd > now) continue;
+      if (segEnd > now || (now.getTime() - stat.mtimeMs) < 5000) continue;
       if (segEnd > start && segStart < end) {
-        segments.push({ filePath: path.join(dirPath, fileName), segStart, segEnd });
+        segments.push({ filePath, segStart, segEnd });
       }
     }
   }

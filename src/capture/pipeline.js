@@ -1,9 +1,11 @@
 'use strict';
 
+const config = require('../config');
+
 // Detection: run inference once every N frames.
-// At 30fps, DETECTION_SKIP=15 = ~2 attempts/sec. Gated by _isDetecting so
+// At 30fps, DETECTION_SKIP=10 = ~3 attempts/sec. Gated by _isDetecting so
 // inference pile-up is impossible regardless of fps.
-const DETECTION_SKIP = 15;
+const DETECTION_SKIP = Math.max(1, config.detectionFrameSkip || 10);
 
 // Frame save: pipe to encoder once every N frames.
 // At 30fps, FRAME_SAVE_SKIP=2 gives 15fps to the H.264 encoder — must match SEGMENT_FPS in .env.
@@ -36,8 +38,10 @@ function start({ camera, wsServer, detector, presenceTracker, videoRecorder, db,
   camera.on('frame', async (buffer) => {
     _frameCounter++;
 
-    // 1. Broadcast to all live-view clients
-    wsServer.broadcastFrame(buffer.toString('base64'));
+    // 1. Broadcast to all live-view clients.
+    // Keep the frame as a raw JPEG Buffer so we avoid expensive base64 conversion
+    // on every camera frame when running on lower-end CPUs.
+    wsServer.broadcastFrame(buffer);
 
     // 2. Pipe frame into video encoder (throttled to FRAME_SAVE_SKIP)
     if (_frameCounter % FRAME_SAVE_SKIP === 0) {

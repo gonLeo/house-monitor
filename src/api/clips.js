@@ -3,8 +3,33 @@
 const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const storage  = require('../storage/files');
+
+function isReadableMediaSegment(filePath, streamType) {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 1024) return false;
+
+    const args = ['-v', 'error', '-i', filePath, '-map', `0:${streamType}:0`];
+    if (streamType === 'v') {
+      args.push('-frames:v', '1');
+    } else {
+      args.push('-frames:a', '1');
+    }
+    args.push('-f', 'null', '-');
+
+    const result = spawnSync('ffmpeg', args, {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+      timeout: 15000,
+    });
+
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Generate an MP4 clip from stored video segments (+ audio if available) within
@@ -22,10 +47,18 @@ async function generate(startTime, endTime, res) {
   const clipStart = new Date(startTime);
   const clipEnd   = new Date(endTime);
 
-  const videoSegments = storage.getVideoSegmentsInRange(startTime, endTime);
+  const videoSegments = storage
+    .getVideoSegmentsInRange(startTime, endTime)
+    .filter((seg) => {
+      const ok = isReadableMediaSegment(seg.filePath, 'v');
+      if (!ok) {
+        console.warn('[Clips] Skipping unreadable video segment:', seg.filePath);
+      }
+      return ok;
+    });
 
   if (videoSegments.length === 0) {
-    res.status(404).json({ error: 'No video segments found in the specified time range.' });
+    res.status(404).json({ error: 'No valid video segments found in the specified time range.' });
     return;
   }
 
@@ -44,7 +77,9 @@ async function generate(startTime, endTime, res) {
   }
 
   // Build audio concat list (same strategy as before).
-  const audioSegments = storage.getAudioSegmentsInRange(startTime, endTime);
+  const audioSegments = storage
+    .getAudioSegmentsInRange(startTime, endTime)
+    .filter((seg) => isReadableMediaSegment(seg.filePath, 'a'));
   const hasAudio      = audioSegments.length > 0;
   const audioLines    = [];
   if (hasAudio) {
@@ -80,18 +115,19 @@ async function generate(startTime, endTime, res) {
   // Video: stream copy (no re-encode) — segments are already H.264.
   // Audio: re-encode to AAC for compatibility (m4a → mp4 container).
   const args = [
+    '-fflags', '+genpts',
     '-f', 'concat', '-safe', '0', '-i', tmpVideoList,
   ];
   if (hasAudio) {
     args.push('-f', 'concat', '-safe', '0', '-i', tmpAudioList);
   }
-  args.push('-c:v', 'copy');
+  args.push('-c:v', 'copy', '-copyinkf');
   if (hasAudio) {
     args.push('-c:a', 'aac', '-b:a', '64k');
   } else {
     args.push('-an');
   }
-  args.push('-movflags', '+faststart', '-y', tmpOut);
+  args.push('-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', tmpOut);
 
   const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
 

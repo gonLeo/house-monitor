@@ -24,7 +24,10 @@ module.exports = {
     segmentSeconds: parseInt(process.env.AUDIO_SEGMENT_SECONDS || '60', 10),
     bitrate:        process.env.AUDIO_BITRATE          || '64k',
   },
-  absenceThresholdSeconds: parseInt(process.env.ABSENCE_THRESHOLD_SECONDS || '10',  10),
+  // Detection attempts are gated by _isDetecting, so lowering this value reduces
+  // the time-to-first-detect without allowing inference pile-up on slow CPUs.
+  detectionFrameSkip:      parseInt(process.env.DETECTION_FRAME_SKIP       || '10',  10),
+  absenceThresholdSeconds: parseInt(process.env.ABSENCE_THRESHOLD_SECONDS   || '10',  10),
   port:                    parseInt(process.env.PORT                       || '3000', 10),
   framesDir:               process.env.FRAMES_DIR                          || './frames',
   snapshotsDir:            process.env.SNAPSHOTS_DIR                       || './snapshots',

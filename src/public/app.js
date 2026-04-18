@@ -5,6 +5,7 @@ let wsReconnectTimer = null;
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}`);
+  ws.binaryType = 'blob';
 
   ws.onopen = () => {
     document.getElementById('ws-status').textContent = 'conectado';
@@ -21,11 +22,15 @@ function connectWs() {
   ws.onerror = () => {};
 
   ws.onmessage = (e) => {
+    if (typeof e.data !== 'string') {
+      handleFrameBlob(e.data);
+      return;
+    }
+
     let msg;
     try { msg = JSON.parse(e.data); } catch { return; }
     switch (msg.type) {
-      case 'frame':         handleFrame(msg.data);    break;
-      case 'fps':           handleFps(msg.value);     break;
+      case 'fps':           handleFps(msg.value);       break;
       case 'detection':     handleDetection(msg.event); break;
       case 'camera_status': handleCameraStatus(msg.status); break;
     }
@@ -36,15 +41,24 @@ function connectWs() {
 const streamImg   = document.getElementById('stream-img');
 const placeholder = document.getElementById('stream-placeholder');
 let firstFrame = true;
+let currentFrameUrl = null;
 
-function handleFrame(base64) {
+function handleFrameBlob(blob) {
   if (firstFrame) {
     placeholder.style.display = 'none';
     streamImg.style.display = 'block';
     firstFrame = false;
     setCamStatus('online');
   }
-  streamImg.src = 'data:image/jpeg;base64,' + base64;
+
+  const nextUrl = URL.createObjectURL(blob);
+  const prevUrl = currentFrameUrl;
+  currentFrameUrl = nextUrl;
+  streamImg.src = nextUrl;
+
+  if (prevUrl) {
+    setTimeout(() => URL.revokeObjectURL(prevUrl), 1500);
+  }
 }
 
 function handleFps(value) {
