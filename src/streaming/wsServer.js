@@ -2,20 +2,36 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 
+const MAX_BUFFERED_BYTES = 512 * 1024;
+const PREVIEW_FRAME_SKIP = 3;
+
 class WsServer {
   constructor(httpServer) {
     this.wss = new WebSocketServer({ server: httpServer });
     this._frameCount = 0;
     this._lastFrameCount = 0;
+    this._previewFrameCounter = 0;
 
     this.wss.on('connection', (ws) => {
+      ws._backpressureLogged = false;
       console.log('[WS] Client connected. Total:', this.wss.clients.size);
+
+      if (ws._socket) {
+        ws._socket.on('error', (err) => {
+          console.warn('[WS] Socket error:', err.message);
+        });
+      }
+
       ws.on('close', () => {
         console.log('[WS] Client disconnected. Total:', this.wss.clients.size);
       });
       ws.on('error', (err) => {
         console.warn('[WS] Client error:', err.message);
       });
+    });
+
+    this.wss.on('error', (err) => {
+      console.warn('[WS] Server error:', err.message);
     });
 
     // Compute and broadcast FPS every second
@@ -33,6 +49,10 @@ class WsServer {
   broadcastFrame(base64) {
     this._frameCount++;
     if (this.wss.clients.size === 0) return;
+
+    this._previewFrameCounter++;
+    if (this._previewFrameCounter % PREVIEW_FRAME_SKIP !== 0) return;
+
     const data = JSON.stringify({ type: 'frame', data: base64 });
     this._sendToAll(data);
   }
@@ -49,12 +69,28 @@ class WsServer {
 
   _sendToAll(data) {
     for (const client of this.wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+
+      const bufferedAmount = client.bufferedAmount || 0;
+      if (bufferedAmount > MAX_BUFFERED_BYTES) {
+        if (!client._backpressureLogged) {
+          client._backpressureLogged = true;
+          console.warn('[WS] Dropping preview frames for a slow client. bufferedAmount=', bufferedAmount);
+        }
+        continue;
+      }
+
+      client._backpressureLogged = false;
+
+      try {
         client.send(data, (err) => {
-          if (err && err.code !== 'ECONNRESET') {
+          if (err && err.code !== 'ECONNRESET' && err.code !== 'ERR_STREAM_DESTROYED') {
             console.warn('[WS] Send error:', err.message);
           }
         });
+      } catch (err) {
+        console.warn('[WS] Unexpected send failure:', err.message);
+        try { client.terminate(); } catch { /* ignore */ }
       }
     }
   }

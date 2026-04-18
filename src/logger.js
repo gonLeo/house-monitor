@@ -2,6 +2,7 @@
 
 const fs   = require('fs');
 const path = require('path');
+const util = require('util');
 
 /**
  * Initialises file logging. Must be called once, early in startup (after config is loaded).
@@ -19,11 +20,46 @@ function init(logsDir) {
   const origWarn  = console.warn.bind(console);
   const origError = console.error.bind(console);
 
+  let fileLoggingAvailable = true;
+
+  stream.on('error', (err) => {
+    fileLoggingAvailable = false;
+    try {
+      origWarn('[Logger] File logging disabled:', err.message);
+    } catch {
+      // ignore terminal write errors too
+    }
+  });
+
+  for (const output of [process.stdout, process.stderr]) {
+    if (!output || typeof output.on !== 'function') continue;
+    output.on('error', (err) => {
+      try {
+        stream.write(`[${new Date().toISOString()}] [LOGGER] Output stream error: ${err.message}\n`);
+      } catch {
+        // ignore recursive write failures
+      }
+    });
+  }
+
   function wrap(orig, level) {
     return (...args) => {
-      orig(...args);
+      const message = util.format(...args);
+
+      try {
+        orig(message);
+      } catch {
+        // stdout/stderr can fail under memory pressure on Windows; keep app alive
+      }
+
+      if (!fileLoggingAvailable) return;
+
       const prefix = `[${new Date().toISOString()}] [${level}] `;
-      stream.write(prefix + args.map(String).join(' ') + '\n');
+      try {
+        stream.write(prefix + message + '\n');
+      } catch {
+        fileLoggingAvailable = false;
+      }
     };
   }
 
