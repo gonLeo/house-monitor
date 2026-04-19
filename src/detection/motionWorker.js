@@ -3,12 +3,56 @@
 const { parentPort } = require('worker_threads');
 const Jimp = require('jimp');
 
+const EMPTY_RESULT = Object.freeze({
+  motion: false,
+  score: 0,
+  changedPixels: 0,
+  totalPixels: 0,
+  requiredPixels: 0,
+});
+
 let previousGray = null;
 let previousWidth = 0;
 let previousHeight = 0;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function toBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  return Buffer.from(value || []);
+}
+
+function createGrayscaleSample(image, sampleWidth) {
+  const { width: sourceWidth, height: sourceHeight, data } = image.bitmap;
+  const width = Math.max(1, sampleWidth);
+  const height = Math.max(1, Math.round((sourceHeight * width) / sourceWidth));
+  const gray = new Uint8Array(width * height);
+
+  const xScale = sourceWidth / width;
+  const yScale = sourceHeight / height;
+
+  let offset = 0;
+  for (let y = 0; y < height; y++) {
+    const sourceY = Math.min(sourceHeight - 1, Math.floor((y + 0.5) * yScale));
+    const rowOffset = sourceY * sourceWidth * 4;
+
+    for (let x = 0; x < width; x++) {
+      const sourceX = Math.min(sourceWidth - 1, Math.floor((x + 0.5) * xScale));
+      const idx = rowOffset + (sourceX * 4);
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      gray[offset++] = (r * 77 + g * 150 + b * 29) >> 8;
+    }
+  }
+
+  return { width, height, gray };
 }
 
 async function analyze(buffer, options = {}) {
@@ -19,22 +63,17 @@ async function analyze(buffer, options = {}) {
   const roi = options.roi || { x: 0, y: 0, w: 1, h: 1 };
 
   const image = await Jimp.read(buffer);
-  image.resize(sampleWidth, Jimp.AUTO).greyscale().blur(1);
-
-  const { width, height, data } = image.bitmap;
-  const gray = new Uint8Array(width * height);
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = y * width + x;
-      gray[idx] = data[idx * 4];
-    }
-  }
+  const { width, height, gray } = createGrayscaleSample(image, sampleWidth);
 
   if (!previousGray || previousWidth !== width || previousHeight !== height) {
     previousGray = gray;
     previousWidth = width;
     previousHeight = height;
-    return { motion: false, score: 0, changedPixels: 0, totalPixels: 0, requiredPixels: minChangedPixels };
+    return {
+      ...EMPTY_RESULT,
+      totalPixels: width * height,
+      requiredPixels: minChangedPixels,
+    };
   }
 
   const startX = Math.floor(clamp(Number(roi.x) || 0, 0, 1) * width);
@@ -74,16 +113,12 @@ async function analyze(buffer, options = {}) {
 
 parentPort.on('message', async ({ id, buffer, options }) => {
   try {
-    const jpegBuffer = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+    const jpegBuffer = toBuffer(buffer);
     const result = await analyze(jpegBuffer, options);
     parentPort.postMessage({ type: 'result', id, result });
   } catch (err) {
     console.warn('[MotionWorker] Failed to analyze frame:', err.message);
-    parentPort.postMessage({
-      type: 'result',
-      id,
-      result: { motion: false, score: 0, changedPixels: 0, totalPixels: 0, requiredPixels: 0 },
-    });
+    parentPort.postMessage({ type: 'result', id, result: EMPTY_RESULT });
   }
 });
 

@@ -9,6 +9,15 @@ const cocoSsd = require('@tensorflow-models/coco-ssd');
 
 let model = null;
 
+function toBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  return Buffer.from(value || []);
+}
+
 async function init() {
   // tfjs-node registers its own backend automatically — no setBackend needed.
   await tf.ready();
@@ -33,8 +42,9 @@ parentPort.on('message', async ({ id, buffer }) => {
   let inputTensor = null;
 
   try {
+    const jpegBuffer = toBuffer(buffer);
     inputTensor = tf.tidy(() => {
-      const decoded = tf.node.decodeImage(buffer, 3);
+      const decoded = tf.node.decodeImage(jpegBuffer, 3);
       const [height, width] = decoded.shape;
       const targetWidth = 300;
       const targetHeight = Math.max(1, Math.round((height * targetWidth) / width));
