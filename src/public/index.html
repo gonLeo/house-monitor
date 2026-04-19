@@ -28,7 +28,10 @@
         <div id="stream-wrapper">
           <img id="stream-img" alt="stream" />
           <div id="stream-placeholder">Aguardando câmera…</div>
-          <div id="detection-flash">🚨 Pessoa detectada!</div>
+          <div id="detection-flash">🚨 Detecção registrada!</div>
+          <div id="roi-overlay" aria-hidden="true">
+            <div id="roi-box"></div>
+          </div>
         </div>
       </div>
 
@@ -74,6 +77,20 @@
                 <span class="slider"></span>
               </div>
             </label>
+
+            <div class="ops-divider"></div>
+
+            <label class="mode-control" title="Escolher estratégia de detecção">
+              <span>🎛️ Modo</span>
+              <select id="detection-mode">
+                <option value="motion_only">Movimento</option>
+                <option value="motion_and_human">Movimento + Humano</option>
+                <option value="human_only">Somente Humano</option>
+              </select>
+            </label>
+
+            <button class="btn-secondary btn-roi" id="roi-edit-btn" onclick="toggleRoiEdit()">🎯 Definir área</button>
+            <button class="btn-secondary btn-roi" id="roi-clear-btn" onclick="clearRoi()">↺ Área total</button>
 
             <div class="ops-divider"></div>
 
@@ -134,6 +151,15 @@
             <div>
               <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Até</label>
               <input type="datetime-local" id="filter-end" />
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Tipo</label>
+              <select id="filter-type">
+                <option value="">Todos</option>
+                <option value="motion_detected">Movimento</option>
+                <option value="person_detected">Humano</option>
+                <option value="connection_restored">Conectividade</option>
+              </select>
             </div>
           </div>
           <div class="btn-row">

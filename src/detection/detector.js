@@ -6,13 +6,17 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 
-let worker   = null;
-let isReady  = false;
+let worker    = null;
+let isReady   = false;
 let idCounter = 0;
+let loadPromise = null;
 const pending = new Map(); // id → resolve function
 
 function load() {
-  return new Promise((resolve, reject) => {
+  if (isReady) return Promise.resolve();
+  if (loadPromise) return loadPromise;
+
+  loadPromise = new Promise((resolve, reject) => {
     worker = new Worker(path.join(__dirname, 'detectorWorker.js'));
 
     worker.on('message', (msg) => {
@@ -36,8 +40,21 @@ function load() {
 
     worker.on('exit', (code) => {
       if (code !== 0) console.error(`[Detector] Worker exited with code ${code}`);
+      isReady = false;
+      loadPromise = null;
+      worker = null;
+      for (const resolvePending of pending.values()) {
+        resolvePending([]);
+      }
+      pending.clear();
     });
   });
+
+  return loadPromise;
+}
+
+function isLoaded() {
+  return isReady;
 }
 
 /**
@@ -58,4 +75,4 @@ function detect(jpegBuffer) {
   });
 }
 
-module.exports = { load, detect };
+module.exports = { load, detect, isLoaded };

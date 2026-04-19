@@ -40,8 +40,15 @@ function connectWs() {
 // ── Frame display ─────────────────────────────────────────────
 const streamImg   = document.getElementById('stream-img');
 const placeholder = document.getElementById('stream-placeholder');
+const roiOverlay  = document.getElementById('roi-overlay');
+const roiBox      = document.getElementById('roi-box');
+const detectionModeSelect = document.getElementById('detection-mode');
 let firstFrame = true;
 let currentFrameUrl = null;
+let currentSettings = null;
+let roiEditMode = false;
+let roiPointerStart = null;
+let roiDraft = null;
 
 function handleFrameBlob(blob) {
   if (firstFrame) {
@@ -65,46 +72,146 @@ function handleFps(value) {
   document.getElementById('fps-val').textContent = value;
 }
 
-// ── Alarm feature flag ────────────────────────────────────────
+// ── Runtime settings / feature flags ──────────────────────────
 const alarmToggle = document.getElementById('alarm-enabled');
+const notificationsToggle = document.getElementById('notifications-enabled');
 
-async function fetchAlarmState() {
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function renderRoi(roi = { x: 0, y: 0, w: 1, h: 1 }) {
+  const isFullArea = roi.x === 0 && roi.y === 0 && roi.w === 1 && roi.h === 1;
+
+  if (isFullArea && !roiEditMode) {
+    roiBox.style.display = 'none';
+    return;
+  }
+
+  roiBox.style.display = 'block';
+  roiBox.style.left = `${roi.x * 100}%`;
+  roiBox.style.top = `${roi.y * 100}%`;
+  roiBox.style.width = `${roi.w * 100}%`;
+  roiBox.style.height = `${roi.h * 100}%`;
+}
+
+async function loadSettings() {
   try {
-    const res = await fetch('/api/alarm');
-    const { enabled } = await res.json();
-    alarmToggle.checked = enabled;
+    const res = await fetch('/api/settings');
+    currentSettings = await res.json();
+    alarmToggle.checked = Boolean(currentSettings.alarmEnabled);
+    notificationsToggle.checked = Boolean(currentSettings.notificationsEnabled);
+    detectionModeSelect.value = currentSettings.detectionMode || 'motion_only';
+    renderRoi(currentSettings.motion?.roi);
   } catch {}
 }
 
 alarmToggle.addEventListener('change', async () => {
   try {
-    await fetch('/api/alarm', {
+    const res = await fetch('/api/alarm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: alarmToggle.checked }),
     });
+    const { enabled } = await res.json();
+    alarmToggle.checked = enabled;
   } catch {}
 });
 
-// ── Notifications feature flag ────────────────────────────────
-const notificationsToggle = document.getElementById('notifications-enabled');
-
-async function fetchNotificationsState() {
-  try {
-    const res = await fetch('/api/notifications');
-    const { enabled } = await res.json();
-    notificationsToggle.checked = enabled;
-  } catch {}
-}
-
 notificationsToggle.addEventListener('change', async () => {
   try {
-    await fetch('/api/notifications', {
+    const res = await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: notificationsToggle.checked }),
     });
+    const { enabled } = await res.json();
+    notificationsToggle.checked = enabled;
   } catch {}
+});
+
+detectionModeSelect.addEventListener('change', async () => {
+  try {
+    const res = await fetch('/api/detection-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: detectionModeSelect.value }),
+    });
+    const { mode } = await res.json();
+    detectionModeSelect.value = mode;
+    if (currentSettings) currentSettings.detectionMode = mode;
+  } catch {}
+});
+
+function toggleRoiEdit() {
+  roiEditMode = !roiEditMode;
+  roiPointerStart = null;
+  roiDraft = null;
+  roiOverlay.classList.toggle('editing', roiEditMode);
+  document.getElementById('roi-edit-btn').textContent = roiEditMode ? '✋ Arraste na imagem' : '🎯 Definir área';
+  renderRoi(currentSettings?.motion?.roi);
+}
+
+async function persistRoi(roi) {
+  const res = await fetch('/api/motion-roi', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ roi }),
+  });
+  const data = await res.json();
+  if (currentSettings) {
+    currentSettings.motion = currentSettings.motion || {};
+    currentSettings.motion.roi = data.roi;
+  }
+  renderRoi(data.roi);
+}
+
+async function clearRoi() {
+  roiEditMode = false;
+  roiOverlay.classList.remove('editing');
+  document.getElementById('roi-edit-btn').textContent = '🎯 Definir área';
+  try {
+    await persistRoi({ x: 0, y: 0, w: 1, h: 1 });
+  } catch {}
+}
+
+roiOverlay.addEventListener('pointerdown', (event) => {
+  if (!roiEditMode) return;
+  const rect = roiOverlay.getBoundingClientRect();
+  roiPointerStart = {
+    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+    y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
+  };
+  roiDraft = { ...roiPointerStart, w: 0.05, h: 0.05 };
+  renderRoi(roiDraft);
+});
+
+roiOverlay.addEventListener('pointermove', (event) => {
+  if (!roiEditMode || !roiPointerStart) return;
+  const rect = roiOverlay.getBoundingClientRect();
+  const x = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+  const y = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+  const left = Math.min(roiPointerStart.x, x);
+  const top = Math.min(roiPointerStart.y, y);
+  roiDraft = {
+    x: left,
+    y: top,
+    w: Math.max(0.05, Math.abs(x - roiPointerStart.x)),
+    h: Math.max(0.05, Math.abs(y - roiPointerStart.y)),
+  };
+  renderRoi(roiDraft);
+});
+
+window.addEventListener('pointerup', async () => {
+  if (!roiEditMode || !roiPointerStart || !roiDraft) return;
+  try {
+    await persistRoi(roiDraft);
+  } catch {}
+  roiEditMode = false;
+  roiPointerStart = null;
+  roiDraft = null;
+  roiOverlay.classList.remove('editing');
+  document.getElementById('roi-edit-btn').textContent = '🎯 Definir área';
 });
 
 // ── Detection notification ────────────────────────────────────
@@ -112,6 +219,10 @@ let flashTimer = null;
 
 function handleDetection(event) {
   const flash = document.getElementById('detection-flash');
+  const isMotion = event.type === 'motion_detected';
+  flash.textContent = isMotion ? '👀 Movimento detectado!' : '🚨 Pessoa detectada!';
+  flash.classList.toggle('motion', isMotion);
+  flash.classList.toggle('person', !isMotion);
   flash.style.display = 'block';
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { flash.style.display = 'none'; }, 4000);
@@ -167,26 +278,38 @@ function buildEventCard(ev) {
   item.className = 'event-item';
   item.dataset.id = ev.id;
 
+  const typeIcon = ev.type === 'connection_restored'
+    ? '🔗'
+    : ev.type === 'motion_detected'
+      ? '👀'
+      : ev.type === 'person_detected'
+        ? '🚨'
+        : '⚡';
+
   let thumbHtml;
   if (ev.snapshot_path) {
     thumbHtml = `<img class="event-thumb" src="/snapshots/event-${ev.id}.jpg" alt="snapshot"
       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
       <div class="event-thumb-placeholder" style="display:none">📷</div>`;
   } else {
-    thumbHtml = `<div class="event-thumb-placeholder">
-      ${ev.type === 'connection_restored' ? '🔗' : '⚡'}
-    </div>`;
+    thumbHtml = `<div class="event-thumb-placeholder">${typeIcon}</div>`;
   }
 
-  const confHtml = ev.confidence
-    ? `<div class="event-conf">conf: ${(ev.confidence * 100).toFixed(1)}%</div>`
+  const metricLabel = ev.type === 'motion_detected' ? 'atividade' : 'conf';
+  const confHtml = ev.confidence !== null && ev.confidence !== undefined
+    ? `<div class="event-conf">${metricLabel}: ${(ev.confidence * 100).toFixed(1)}%</div>`
     : '';
 
   const durHtml = ev.ended_at
     ? `<div class="event-conf">duração: ${formatDuration(ev.timestamp, ev.ended_at)}</div>`
     : '';
 
-  const typeClass = ev.type === 'connection_restored' ? 'connection_restored' : '';
+  const typeClass = ev.type || '';
+  const typeLabel = ev.type === 'motion_detected'
+    ? 'movimento detectado'
+    : ev.type === 'person_detected'
+      ? 'humano detectado'
+      : ev.type.replace(/_/g, ' ');
 
   // Clip button: only enable once the segment covering the event end is finalised.
   // Segments take ~60s to record; allow 70s after ended_at before enabling.
@@ -195,13 +318,13 @@ function buildEventCard(ev) {
   const endedAtMs      = ev.ended_at ? new Date(ev.ended_at).getTime() : NaN;
   const clipReady      = !isNaN(endedAtMs) && (Date.now() - endedAtMs) > CLIP_READY_MS;
   const clipBtn = clipReady
-    ? `<button class="btn-clip" onclick="openClipViewer('${ev.timestamp}', '${ev.ended_at}')">▶ Ver Clipe</button>`
-    : `<button class="btn-clip" disabled title="Disponível ~70s após o fim do evento">⏳ Processando…</button>`;
+    ? `<button class="btn-clip" onclick="openClipViewer('${ev.timestamp}', '${ev.ended_at}', '${ev.type || ''}')">▶ Ver Clipe</button>`
+    : `<button class="btn-clip" disabled title="Disponível quando a gravação do ciclo terminar">⏳ Processando…</button>`;
 
   item.innerHTML = `
     ${thumbHtml}
     <div class="event-info">
-      <div class="event-type ${typeClass}">${ev.type.replace(/_/g, ' ')}</div>
+      <div class="event-type ${typeClass}">${typeLabel}</div>
       <div class="event-ts">${formatTs(ev.timestamp)}</div>
       ${confHtml}
       ${durHtml}
@@ -220,10 +343,12 @@ function prependEventCard(ev) {
 async function loadEvents() {
   const start = document.getElementById('filter-start').value;
   const end   = document.getElementById('filter-end').value;
+  const type  = document.getElementById('filter-type').value;
 
   let url = '/events?';
   if (start) url += `startTime=${encodeURIComponent(new Date(start).toISOString())}&`;
   if (end)   url += `endTime=${encodeURIComponent(new Date(end).toISOString())}&`;
+  if (type)  url += `type=${encodeURIComponent(type)}&`;
 
   let events;
   try {
@@ -249,6 +374,7 @@ async function loadEvents() {
 function clearFilter() {
   document.getElementById('filter-start').value = '';
   document.getElementById('filter-end').value   = '';
+  document.getElementById('filter-type').value  = '';
   loadEvents();
 }
 
@@ -286,14 +412,18 @@ async function loadConnectivity() {
 }
 
 // ── Clip viewer modal ─────────────────────────────────────────
-const CLIP_PADDING_MS = 10 * 1000; // 10s before/after the event window
+const CLIP_PADDING_MS = 10 * 1000; // default preroll for manual and human clips
 let _clipObjectUrl = null;
 
-async function openClipViewer(timestamp, endedAt) {
+async function openClipViewer(timestamp, endedAt, eventType = '') {
   const eventStart = new Date(timestamp);
   const eventEnd   = endedAt ? new Date(endedAt) : eventStart;
-  const start = new Date(eventStart.getTime() - CLIP_PADDING_MS);
-  const end   = new Date(eventEnd.getTime()   + CLIP_PADDING_MS);
+  const preRollMs  = eventType === 'motion_detected'
+    ? (currentSettings?.motion?.preRollSeconds || 10) * 1000
+    : CLIP_PADDING_MS;
+  const postRollMs = eventType === 'motion_detected' ? 0 : CLIP_PADDING_MS;
+  const start = new Date(eventStart.getTime() - preRollMs);
+  const end   = new Date(eventEnd.getTime()   + postRollMs);
   const url   = `/clip?startTime=${encodeURIComponent(start.toISOString())}&endTime=${encodeURIComponent(end.toISOString())}`;
 
   const overlay  = document.getElementById('clip-modal-overlay');
@@ -434,10 +564,9 @@ async function confirmCleanup() {
 
 // ── Init ──────────────────────────────────────────────────────
 connectWs();
+loadSettings();
 loadEvents();
 loadConnectivity();
-fetchAlarmState();
-fetchNotificationsState();
 fetchStorageUsage();
 
 setInterval(loadConnectivity, 30000);

@@ -70,6 +70,10 @@ class PresenceTracker {
     this._currentEventId = eventId;
   }
 
+  isActive() {
+    return this._active;
+  }
+
   /**
    * Notify the tracker that no person was found in the current frame.
    * If the absence threshold has elapsed, the presence window is closed.

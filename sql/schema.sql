@@ -27,3 +27,12 @@ CREATE TABLE IF NOT EXISTS connectivity_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_connectivity_timestamp ON connectivity_log (timestamp DESC);
+
+-- Persistent runtime preferences (feature flags, detection mode, ROI, etc.)
+CREATE TABLE IF NOT EXISTS preferences (
+  key        VARCHAR(100) PRIMARY KEY,
+  value      JSONB        NOT NULL,
+  updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_preferences_updated_at ON preferences (updated_at DESC);

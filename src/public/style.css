@@ -100,6 +100,24 @@ header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
   font-size: 13px;
 }
 
+#roi-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+#roi-overlay.editing {
+  pointer-events: auto;
+  cursor: crosshair;
+  background: rgba(79, 142, 247, 0.08);
+}
+#roi-box {
+  position: absolute;
+  border: 2px solid rgba(79, 142, 247, 0.95);
+  background: rgba(79, 142, 247, 0.12);
+  box-shadow: 0 0 0 9999px rgba(0,0,0,0.18);
+  display: none;
+}
+
 /* Detection flash */
 #detection-flash {
   position: absolute;
@@ -113,6 +131,8 @@ header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
   display: none;
   animation: flashin .2s ease;
 }
+#detection-flash.motion { background: rgba(245,158,11,.95); }
+#detection-flash.person { background: rgba(239,68,68,.95); }
 @keyframes flashin { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 
 /* ── Operational panel ───────────────────────────────────────── */
@@ -168,7 +188,8 @@ header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
 .fps-badge span { color: var(--accent); font-weight: 700; }
 
 /* ── Alarm toggle switch ─────────────────────────────────────── */
-.alarm-toggle {
+.alarm-toggle,
+.mode-control {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -184,6 +205,17 @@ header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
   position: relative;
   width: 32px; height: 18px;
   flex-shrink: 0;
+}
+.mode-control select {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+.btn-roi {
+  white-space: nowrap;
 }
 .alarm-toggle .switch input { display: none; }
 .alarm-toggle .slider {
@@ -278,7 +310,7 @@ header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
 /* Filter form */
 .filter-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
 }
 .filter-row input, .filter-row select {
@@ -344,6 +376,8 @@ button:hover { opacity: .85; }
   margin-bottom: 2px;
 }
 .event-info .event-type.connection_restored { color: var(--green); }
+.event-info .event-type.motion_detected { color: var(--yellow); }
+.event-info .event-type.person_detected { color: var(--red); }
 .event-info .event-ts {
   font-size: 11px;
   color: var(--muted);

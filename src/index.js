@@ -13,7 +13,9 @@ const { waitForConnection } = require('./db/connection');
 const { runMigrations }     = require('./db/migrations');
 const db           = require('./db/queries');
 const detector     = require('./detection/detector');
+const motionDetector = require('./detection/motionDetector');
 const PresenceTracker  = require('./detection/presenceTracker');
+const MotionTracker = require('./detection/motionTracker');
 const CameraCapture = require('./capture/camera');
 const pipeline      = require('./capture/pipeline');
 const VideoSegmentRecorder = require('./capture/videoRecorder');
@@ -25,6 +27,8 @@ const AudioRecorder = require('./capture/audioRecorder');
 const { createServer } = require('./api/server');
 const { startStorageCacheRefresh } = require('./api/routes');
 const ntfy = require('./notifications/ntfy');
+const alarm = require('./alarm');
+const runtimeSettings = require('./settings/runtime');
 
 async function main() {
   console.log('╔══════════════════════════════════╗');
@@ -42,15 +46,32 @@ async function main() {
   // 2. Apply schema migrations (idempotent)
   await runMigrations();
 
-  // 3. Load COCO-SSD detection model (runs in a Worker Thread)
-  console.log('[App] Loading COCO-SSD model in worker thread…');
-  await detector.load();
+  // 3. Load persisted runtime settings before starting services
+  const loadedSettings = await runtimeSettings.load(db);
+  alarm.setEnabled(loadedSettings.alarmEnabled);
+  ntfy.setEnabled(loadedSettings.notificationsEnabled);
+
+  // Motion detection stays on a lightweight worker to preserve stream fluency.
+  await motionDetector.load();
+
+  // Human model is only loaded when required by the active mode.
+  if (loadedSettings.detectionMode !== 'motion_only') {
+    console.log('[App] Loading COCO-SSD model in worker thread…');
+    await detector.load();
+  } else {
+    console.log('[App] Human detector will stay lazy-loaded until needed.');
+  }
 
   // 4. Create HTTP server + Express app
   const camera          = new CameraCapture();
   const audioRecorder   = new AudioRecorder();
   const videoRecorder   = new VideoSegmentRecorder();
   const presenceTracker = new PresenceTracker(config.absenceThresholdSeconds * 1000);
+  const motionTracker   = new MotionTracker({
+    cooldownMs: loadedSettings.motion.cooldownSeconds * 1000,
+    clipWindowMs: loadedSettings.motion.clipSecondsAfter * 1000,
+    minConsecutiveDetections: loadedSettings.motion.consecutiveDetections,
+  });
   const connectivity    = new ConnectivityMonitor();
 
   const app        = createServer(db, connectivity, camera);
@@ -65,7 +86,18 @@ async function main() {
   connectivity.start(db);
 
   // 7. Wire camera → pipeline
-  pipeline.start({ camera, wsServer, detector, presenceTracker, videoRecorder, db, storage });
+  pipeline.start({
+    camera,
+    wsServer,
+    detector,
+    motionDetector,
+    presenceTracker,
+    motionTracker,
+    videoRecorder,
+    db,
+    storage,
+    settings: runtimeSettings,
+  });
 
   // Wire camera disconnect/reconnect notifications
   camera.on('disconnected', () => ntfy.cameraDisconnected());

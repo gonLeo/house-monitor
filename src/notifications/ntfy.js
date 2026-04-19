@@ -110,6 +110,24 @@ class NtfyNotifier {
   }
 
   /**
+   * Fired when the lightweight motion detector sees relevant movement.
+   * @param {{ activityRatio: number }} opts
+   */
+  motionDetected({ activityRatio }) {
+    const now = new Date();
+    this._send({
+      title:    'MOVIMENTO DETECTADO',
+      priority: 'default',
+      tags:     ['eyes', 'camera_with_flash'],
+      body:
+        `👀 Movimento detectado pela câmera!\n\n` +
+        `⏰ Horário: ${formatDateTime(now)}\n` +
+        `📈 Atividade na área monitorada: ${(activityRatio * 100).toFixed(2)}%\n\n` +
+        `📹 Um clipe desse ciclo ficará disponível em breve.`,
+    });
+  }
+
+  /**
    * Fired once when the camera stream drops.
    * The system retries indefinitely (exponential backoff, max 30 s delay).
    */
@@ -180,7 +198,9 @@ class NtfyNotifier {
         const ts    = formatDateTime(new Date(ev.timestamp));
         const label = ev.type === 'person_detected'
           ? '👤 Pessoa detectada'
-          : `📌 ${ev.type}`;
+          : ev.type === 'motion_detected'
+            ? '👀 Movimento detectado'
+            : `📌 ${ev.type}`;
         body += `  • ${label} — ${ts}\n`;
       }
     }
