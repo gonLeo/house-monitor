@@ -1,10 +1,183 @@
-// ── WebSocket ─────────────────────────────────────────────────
+// ── Access token / auth ───────────────────────────────────────
+const ACCESS_TOKEN_KEY = 'houseMonitorAccessToken';
+const authOverlay = document.getElementById('auth-overlay');
+const authForm = document.getElementById('auth-form');
+const authInput = document.getElementById('access-token-input');
+const authError = document.getElementById('auth-error');
+
 let ws = null;
 let wsReconnectTimer = null;
+let authAlertVisible = false;
+let authFlowPromise = null;
+let authFlowResolve = null;
+let pollingStarted = false;
 
+function getAccessToken() {
+  return localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+}
+
+function saveAccessToken(token) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, token);
+  updateProtectedLinks();
+}
+
+function clearAccessToken() {
+  localStorage.removeItem(ACCESS_TOKEN_KEY);
+  updateProtectedLinks();
+}
+
+function withAccessToken(url) {
+  const token = getAccessToken();
+  if (!token) return url;
+
+  const absoluteUrl = new URL(url, window.location.origin);
+  absoluteUrl.searchParams.set('token', token);
+  return `${absoluteUrl.pathname}${absoluteUrl.search}${absoluteUrl.hash}`;
+}
+
+function updateProtectedLinks() {
+  const logsLink = document.querySelector('.btn-logs');
+  if (logsLink) logsLink.href = withAccessToken('/api/logs');
+}
+
+function setAuthOverlay(visible, message = '') {
+  authOverlay.classList.toggle('open', visible);
+  document.body.classList.toggle('auth-locked', visible);
+  authError.textContent = message;
+  if (visible) setTimeout(() => authInput.focus(), 50);
+}
+
+function beginAuthFlow(message = '') {
+  setAuthOverlay(true, message);
+  if (!authFlowPromise) {
+    authFlowPromise = new Promise((resolve) => {
+      authFlowResolve = resolve;
+    });
+  }
+  return authFlowPromise;
+}
+
+async function validateAccessToken(token) {
+  try {
+    const res = await fetch('/api/auth/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Access-Token': token,
+      },
+      body: JSON.stringify({ token }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function refreshProtectedData() {
+  loadSettings();
+  loadEvents();
+  loadConnectivity();
+  fetchStorageUsage();
+}
+
+function startPolling() {
+  if (pollingStarted) return;
+  pollingStarted = true;
+  setInterval(loadConnectivity, 30000);
+  setInterval(fetchStorageUsage, 30 * 60 * 1000);
+  setInterval(() => {
+    const s = document.getElementById('filter-start').value;
+    const e = document.getElementById('filter-end').value;
+    if (!s && !e) loadEvents();
+  }, 30000);
+}
+
+function bindAuthUi() {
+  if (authForm.dataset.bound === '1') return;
+  authForm.dataset.bound = '1';
+
+  authForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const token = authInput.value.trim();
+
+    if (!token) {
+      authError.textContent = 'Informe o token de acesso.';
+      return;
+    }
+
+    authError.textContent = 'Validando…';
+    const valid = await validateAccessToken(token);
+    if (!valid) {
+      clearAccessToken();
+      authError.textContent = 'Token inválido.';
+      authInput.select();
+      return;
+    }
+
+    saveAccessToken(token);
+    authInput.value = '';
+    authError.textContent = '';
+    setAuthOverlay(false);
+    authAlertVisible = false;
+
+    if (authFlowResolve) {
+      authFlowResolve(true);
+      authFlowResolve = null;
+      authFlowPromise = null;
+    }
+
+    connectWs();
+    refreshProtectedData();
+    startPolling();
+  });
+}
+
+async function handleUnauthorized() {
+  if (authAlertVisible) return;
+  authAlertVisible = true;
+  clearAccessToken();
+  clearTimeout(wsReconnectTimer);
+  try { if (ws) ws.close(); } catch {}
+  await beginAuthFlow('Token ausente ou inválido. Digite novamente.');
+}
+
+async function ensureAccessToken() {
+  const stored = getAccessToken();
+  if (stored && await validateAccessToken(stored)) {
+    saveAccessToken(stored);
+    setAuthOverlay(false);
+    return true;
+  }
+
+  clearAccessToken();
+  return beginAuthFlow('Digite o token de acesso para liberar o painel.');
+}
+
+async function authFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  const token = getAccessToken();
+  if (token) headers.set('X-Access-Token', token);
+
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401 || response.status === 403) {
+    await handleUnauthorized();
+    throw new Error('Acesso negado');
+  }
+  return response;
+}
+
+// ── WebSocket ─────────────────────────────────────────────────
 function connectWs() {
+  const tokenValue = getAccessToken();
+  if (!tokenValue) return;
+
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}`);
+  const token = encodeURIComponent(tokenValue);
+  ws = new WebSocket(`${proto}//${location.host}/?token=${token}`);
   ws.binaryType = 'blob';
 
   ws.onopen = () => {
@@ -13,9 +186,13 @@ function connectWs() {
     clearTimeout(wsReconnectTimer);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     document.getElementById('ws-status').textContent = 'desconectado';
     document.getElementById('ws-status').style.color = 'var(--red)';
+    if (event.code === 1008) {
+      handleUnauthorized().catch(() => {});
+      return;
+    }
     wsReconnectTimer = setTimeout(connectWs, 3000);
   };
 
@@ -97,7 +274,7 @@ function renderRoi(roi = { x: 0, y: 0, w: 1, h: 1 }) {
 
 async function loadSettings() {
   try {
-    const res = await fetch('/api/settings');
+    const res = await authFetch('/api/settings');
     currentSettings = await res.json();
     alarmToggle.checked = Boolean(currentSettings.alarmEnabled);
     notificationsToggle.checked = Boolean(currentSettings.notificationsEnabled);
@@ -108,7 +285,7 @@ async function loadSettings() {
 
 alarmToggle.addEventListener('change', async () => {
   try {
-    const res = await fetch('/api/alarm', {
+    const res = await authFetch('/api/alarm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: alarmToggle.checked }),
@@ -120,7 +297,7 @@ alarmToggle.addEventListener('change', async () => {
 
 notificationsToggle.addEventListener('change', async () => {
   try {
-    const res = await fetch('/api/notifications', {
+    const res = await authFetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled: notificationsToggle.checked }),
@@ -132,7 +309,7 @@ notificationsToggle.addEventListener('change', async () => {
 
 detectionModeSelect.addEventListener('change', async () => {
   try {
-    const res = await fetch('/api/detection-mode', {
+    const res = await authFetch('/api/detection-mode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: detectionModeSelect.value }),
@@ -153,7 +330,7 @@ function toggleRoiEdit() {
 }
 
 async function persistRoi(roi) {
-  const res = await fetch('/api/motion-roi', {
+  const res = await authFetch('/api/motion-roi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ roi }),
@@ -288,7 +465,7 @@ function buildEventCard(ev) {
 
   let thumbHtml;
   if (ev.snapshot_path) {
-    thumbHtml = `<img class="event-thumb" src="/snapshots/event-${ev.id}.jpg" alt="snapshot"
+    thumbHtml = `<img class="event-thumb" src="${withAccessToken(`/snapshots/event-${ev.id}.jpg`)}" alt="snapshot"
       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
       <div class="event-thumb-placeholder" style="display:none">📷</div>`;
   } else {
@@ -352,7 +529,7 @@ async function loadEvents() {
 
   let events;
   try {
-    const r = await fetch(url);
+    const r = await authFetch(url);
     events = await r.json();
   } catch { return; }
 
@@ -382,7 +559,7 @@ function clearFilter() {
 async function loadConnectivity() {
   let data;
   try {
-    const r = await fetch('/status');
+    const r = await authFetch('/status');
     data = await r.json();
   } catch { return; }
 
@@ -424,7 +601,7 @@ async function openClipViewer(timestamp, endedAt, eventType = '') {
   const postRollMs = eventType === 'motion_detected' ? 0 : CLIP_PADDING_MS;
   const start = new Date(eventStart.getTime() - preRollMs);
   const end   = new Date(eventEnd.getTime()   + postRollMs);
-  const url   = `/clip?startTime=${encodeURIComponent(start.toISOString())}&endTime=${encodeURIComponent(end.toISOString())}`;
+  const url   = withAccessToken(`/clip?startTime=${encodeURIComponent(start.toISOString())}&endTime=${encodeURIComponent(end.toISOString())}`);
 
   const overlay  = document.getElementById('clip-modal-overlay');
   const video    = document.getElementById('clip-modal-video');
@@ -442,7 +619,7 @@ async function openClipViewer(timestamp, endedAt, eventType = '') {
   if (_clipObjectUrl) { URL.revokeObjectURL(_clipObjectUrl); _clipObjectUrl = null; }
 
   try {
-    const res = await fetch(url);
+    const res = await authFetch(url);
     if (!res.ok) {
       let msg = `Erro ${res.status}`;
       try { const j = await res.json(); msg = j.error || msg; } catch { /* ignore */ }
@@ -480,7 +657,7 @@ function buildClipLink() {
   const start = document.getElementById('clip-start').value;
   const end   = document.getElementById('clip-end').value;
   if (!start || !end) { alert('Selecione data/hora de início e fim.'); return; }
-  const url  = `/clip?startTime=${encodeURIComponent(new Date(start).toISOString())}&endTime=${encodeURIComponent(new Date(end).toISOString())}`;
+  const url  = withAccessToken(`/clip?startTime=${encodeURIComponent(new Date(start).toISOString())}&endTime=${encodeURIComponent(new Date(end).toISOString())}`);
   const link = document.getElementById('clip-link');
   link.href         = url;
   link.style.display = 'block';
@@ -502,7 +679,7 @@ function renderStorageUsage(data) {
 
 async function fetchStorageUsage() {
   try {
-    const r = await fetch('/api/storage-usage');
+    const r = await authFetch('/api/storage-usage');
     renderStorageUsage(await r.json());
   } catch {}
 }
@@ -511,7 +688,7 @@ async function refreshStorageUsage() {
   document.getElementById('storage-total').textContent = '…';
   document.getElementById('storage-ts').textContent = '';
   try {
-    const r = await fetch('/api/storage-usage/refresh', { method: 'POST' });
+    const r = await authFetch('/api/storage-usage/refresh', { method: 'POST' });
     renderStorageUsage(await r.json());
   } catch {}
 }
@@ -522,7 +699,7 @@ function openCleanupModal() {
   document.getElementById('cleanup-confirm-btn').disabled = false;
   document.getElementById('cleanup-confirm-btn').textContent = 'Confirmar limpeza';
   // Fetch current retention config from /status to display in warning text
-  fetch('/status').then(r => r.json()).then(data => {
+  authFetch('/status').then(r => r.json()).then(data => {
     const hours = data.retentionHours;
     if (hours) {
       const label = hours >= 24 ? `${hours / 24}d` : `${hours}h`;
@@ -543,7 +720,7 @@ async function confirmCleanup() {
   const resultEl = document.getElementById('cleanup-result');
   resultEl.style.display = 'none';
   try {
-    const r = await fetch('/api/cleanup/run', { method: 'POST' });
+    const r = await authFetch('/api/cleanup/run', { method: 'POST' });
     const { removedBytes, filesCount } = await r.json();
     resultEl.style.display = 'block';
     resultEl.style.color = 'var(--green)';
@@ -563,16 +740,18 @@ async function confirmCleanup() {
 }
 
 // ── Init ──────────────────────────────────────────────────────
-connectWs();
-loadSettings();
-loadEvents();
-loadConnectivity();
-fetchStorageUsage();
+async function initApp() {
+  bindAuthUi();
+  updateProtectedLinks();
 
-setInterval(loadConnectivity, 30000);
-setInterval(fetchStorageUsage, 30 * 60 * 1000);
-setInterval(() => {
-  const s = document.getElementById('filter-start').value;
-  const e = document.getElementById('filter-end').value;
-  if (!s && !e) loadEvents();
-}, 30000);
+  const allowed = await ensureAccessToken();
+  if (!allowed) return;
+
+  connectWs();
+  refreshProtectedData();
+  startPolling();
+}
+
+initApp().catch((err) => {
+  console.error('[UI] Failed to initialize app:', err.message);
+});

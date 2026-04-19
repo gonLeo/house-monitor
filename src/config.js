@@ -41,4 +41,5 @@ module.exports = {
   logsDir:                 process.env.LOGS_DIR                            || './logs',
   // ntfy.sh push notifications — set to your topic string, leave empty to disable.
   ntfyTopic:               process.env.NTFY_TOPIC                          || '',
+  accessToken:             process.env.TOKENACCESS || process.env.tokenaccess || '',
 };

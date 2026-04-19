@@ -8,6 +8,18 @@
 </head>
 <body>
 
+  <div id="auth-overlay" class="auth-overlay open">
+    <div class="auth-card">
+      <h2>🔐 Acesso protegido</h2>
+      <p>Informe o token para liberar o painel de monitoramento.</p>
+      <form id="auth-form" class="auth-form">
+        <input id="access-token-input" type="password" placeholder="Token de acesso" autocomplete="current-password" />
+        <button type="submit" class="btn-primary">Entrar</button>
+      </form>
+      <div id="auth-error" class="auth-error"></div>
+    </div>
+  </div>
+
   <!-- Header -->
   <header>
     <h1>House Monitor</h1>

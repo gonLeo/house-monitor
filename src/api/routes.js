@@ -76,6 +76,13 @@ function startStorageCacheRefresh() {
 function setup(app, db, connectivity, camera) {
 
   // ------------------------------------------------------------------
+  // POST /api/auth/validate — confirms the provided token is valid
+  // ------------------------------------------------------------------
+  app.post('/api/auth/validate', (req, res) => {
+    res.json({ ok: true });
+  });
+
+  // ------------------------------------------------------------------
   // GET /events?startTime=&endTime=&synced=&type=
   // ------------------------------------------------------------------
   app.get('/events', async (req, res) => {

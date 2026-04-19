@@ -20,6 +20,58 @@ body {
   font-size: 14px;
   min-height: 100vh;
 }
+body.auth-locked { overflow: hidden; }
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 23, 0.88);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.auth-overlay.open { display: flex; }
+.auth-card {
+  width: min(100%, 420px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.auth-card h2 {
+  margin-bottom: 10px;
+  font-size: 20px;
+}
+.auth-card p {
+  color: var(--muted);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.auth-form {
+  display: flex;
+  gap: 10px;
+}
+.auth-form input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+}
+.auth-form input:focus {
+  border-color: var(--accent);
+}
+.auth-error {
+  margin-top: 12px;
+  min-height: 18px;
+  color: var(--yellow);
+  font-size: 12px;
+}
 
 /* ── Header ─────────────────────────────────────────────────── */
 header {

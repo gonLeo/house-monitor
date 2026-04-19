@@ -1,6 +1,7 @@
 'use strict';
 
 const { WebSocketServer, WebSocket } = require('ws');
+const auth = require('../auth');
 
 const MAX_BUFFERED_BYTES = 512 * 1024;
 const PREVIEW_FRAME_SKIP = 3;
@@ -12,9 +13,24 @@ class WsServer {
     this._lastFrameCount = 0;
     this._previewFrameCounter = 0;
 
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      const token = auth.getRequestToken(req);
+      const clientIp = auth.getClientIp(req);
+
+      if (!token) {
+        console.warn(`[WS/Auth] Missing token | ip=${clientIp} | url=${req.url}`);
+        ws.close(1008, 'Access token required');
+        return;
+      }
+
+      if (!auth.isValidToken(token)) {
+        console.warn(`[WS/Auth] Invalid token | ip=${clientIp} | url=${req.url}`);
+        ws.close(1008, 'Invalid access token');
+        return;
+      }
+
       ws._backpressureLogged = false;
-      console.log('[WS] Client connected. Total:', this.wss.clients.size);
+      console.log(`[WS/Auth] Access granted | ip=${clientIp} | total=${this.wss.clients.size}`);
 
       if (ws._socket) {
         ws._socket.on('error', (err) => {
