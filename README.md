@@ -93,6 +93,43 @@ npm start
 
 Open **http://localhost:3000** in your browser.
 
+### 6. Remote access with Cloudflare Tunnel
+
+If you want to access the dashboard from outside your local network, you can publish the local app securely through a Cloudflare Tunnel.
+
+#### Option A — quick temporary tunnel
+
+This gives you a random public URL under `trycloudflare.com`:
+
+```powershell
+docker run --rm cloudflare/cloudflared:latest tunnel --url http://host.docker.internal:3000
+```
+
+If your app is running on port `8080`, replace `3000` with `8080`.
+
+#### Option B — permanent tunnel with your own domain
+
+1. In Cloudflare Zero Trust, create a **Named Tunnel**.
+2. Add a **Public Hostname** such as `monitor.yourdomain.com`.
+3. Set the service type to **HTTP** and the URL to:
+   - `http://host.docker.internal:3000`, or
+   - `http://host.docker.internal:8080` if you changed the app port.
+4. Copy the generated tunnel token into your `.env` file:
+
+```env
+CLOUDFLARE_TUNNEL_TOKEN=your_tunnel_token_here
+```
+
+5. Start the tunnel container:
+
+```powershell
+docker compose --profile remote up -d cloudflared
+```
+
+Once started, open your public hostname in the browser.
+
+> The live preview already uses the current page host/protocol for WebSocket streaming, so it also works through HTTPS/WSS behind Cloudflare.
+
 ---
 
 ## How it works
