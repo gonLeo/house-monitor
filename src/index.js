@@ -81,6 +81,7 @@ async function main() {
   const wsServer = new WsServer(httpServer);
 
   // 6. Start background services
+  cleanup.setCaptureControllers({ videoRecorder, audioRecorder });
   cleanup.start();
   startStorageCacheRefresh();
   connectivity.start(db);

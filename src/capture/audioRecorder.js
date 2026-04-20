@@ -37,6 +37,7 @@ class AudioRecorder {
   }
 
   start() {
+    if (this.running) return;
     if (!config.audio.device) {
       console.log('[Audio] AUDIO_DEVICE not configured — audio recording disabled.');
       return;
@@ -50,11 +51,39 @@ class AudioRecorder {
   }
 
   stop() {
+    const proc = this._process;
     this.running = false;
-    if (this._process && !this._process.killed) {
-      this._process.kill('SIGTERM');
-      this._process = null;
+    this._process = null;
+
+    if (!proc || proc.exitCode !== null || proc.killed) {
+      return Promise.resolve();
     }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      proc.once('close', finish);
+      proc.once('error', finish);
+
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        finish();
+        return;
+      }
+
+      setTimeout(() => {
+        try {
+          if (proc.exitCode === null && !proc.killed) proc.kill('SIGKILL');
+        } catch { /* ignore */ }
+        finish();
+      }, 5000);
+    });
   }
 
   _record() {

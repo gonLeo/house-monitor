@@ -34,6 +34,8 @@ class VideoSegmentRecorder {
   }
 
   start() {
+    if (this.running) return;
+
     this.running = true;
     console.log(
       `[VideoRecorder] Recording started: segment=${config.segmentDurationSeconds}s` +
@@ -42,9 +44,33 @@ class VideoSegmentRecorder {
   }
 
   stop() {
+    const proc = this._process;
+
     this.running = false;
     clearTimeout(this._rotateTimer);
     this._endCurrentSegment();
+
+    if (!proc || proc.exitCode !== null || proc.killed) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      proc.once('close', finish);
+      proc.once('error', finish);
+      setTimeout(() => {
+        try {
+          if (proc.exitCode === null && !proc.killed) proc.kill('SIGTERM');
+        } catch { /* ignore */ }
+        finish();
+      }, 3000);
+    });
   }
 
   /**

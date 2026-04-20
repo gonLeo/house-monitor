@@ -7,24 +7,91 @@ const config = require('../config');
 const ntfy   = require('../notifications/ntfy');
 const db     = require('../db/queries');
 
+let captureControllers = {
+  videoRecorder: null,
+  audioRecorder: null,
+};
+let cleanupInFlight = null;
+
+function setCaptureControllers({ videoRecorder = null, audioRecorder = null } = {}) {
+  captureControllers = { videoRecorder, audioRecorder };
+}
+
+async function pauseActiveCaptures() {
+  const paused = [];
+
+  for (const [label, recorder] of [
+    ['video', captureControllers.videoRecorder],
+    ['audio', captureControllers.audioRecorder],
+  ]) {
+    if (!recorder || !recorder.running || typeof recorder.stop !== 'function') continue;
+
+    console.log(`[Cleanup] Pausing ${label} capture before deletion…`);
+    try {
+      await recorder.stop();
+      paused.push({ label, recorder });
+    } catch (err) {
+      console.warn(`[Cleanup] Failed to pause ${label} capture:`, err.message);
+    }
+  }
+
+  return paused;
+}
+
+function resumeCaptures(paused) {
+  for (const { label, recorder } of paused) {
+    if (!recorder || typeof recorder.start !== 'function') continue;
+    try {
+      recorder.start();
+      console.log(`[Cleanup] Resumed ${label} capture after cleanup.`);
+    } catch (err) {
+      console.warn(`[Cleanup] Failed to resume ${label} capture:`, err.message);
+    }
+  }
+}
+
+async function performCleanup(reason = 'manual') {
+  if (cleanupInFlight) {
+    console.log('[Cleanup] Cleanup already in progress; reusing the current run.');
+    return cleanupInFlight;
+  }
+
+  cleanupInFlight = (async () => {
+    const paused = await pauseActiveCaptures();
+    try {
+      const seg   = cleanAllSegments();
+      const audio = cleanAllAudio();
+      const snaps = cleanAllSnapshots();
+      cleanAllLogs();
+      await cleanAllDbRecords();
+
+      const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
+      const totalFiles = seg.files + audio.files + snaps.files;
+      const label = reason === 'scheduled' ? 'Scheduled' : 'Manual';
+
+      console.log(`[Cleanup] ${label} cleanup triggered: ${totalFiles} file(s) removed.`);
+
+      ntfy.cleanupDone({
+        removedBytes:   totalBytes,
+        filesCount:     totalFiles,
+        retentionHours: config.retentionHours,
+      });
+
+      return { removedBytes: totalBytes, filesCount: totalFiles };
+    } finally {
+      resumeCaptures(paused);
+      cleanupInFlight = null;
+    }
+  })();
+
+  return cleanupInFlight;
+}
+
 function start() {
   // Run every retentionHours hours and wipe all media files + DB records
   const cronExpr = `0 */${config.retentionHours} * * *`;
   cron.schedule(cronExpr, async () => {
-    const seg   = cleanAllSegments();
-    const audio = cleanAllAudio();
-    const snaps = cleanAllSnapshots();
-    cleanAllLogs();
-    await cleanAllDbRecords();
-
-    const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
-    const totalFiles = seg.files + audio.files + snaps.files;
-
-    ntfy.cleanupDone({
-      removedBytes:   totalBytes,
-      filesCount:     totalFiles,
-      retentionHours: config.retentionHours,
-    });
+    await performCleanup('scheduled');
   });
   console.log(
     `[Cleanup] Scheduled cleanup every ${config.retentionHours}h (${cronExpr}) — deletes all media files.`
@@ -130,24 +197,7 @@ function cleanAllLogs() {
 }
 
 async function runCleanupNow() {
-  const seg   = cleanAllSegments();
-  const audio = cleanAllAudio();
-  const snaps = cleanAllSnapshots();
-  cleanAllLogs();
-  await cleanAllDbRecords();
-
-  const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
-  const totalFiles = seg.files + audio.files + snaps.files;
-
-  console.log(`[Cleanup] Manual cleanup triggered: ${totalFiles} file(s) removed.`);
-
-  ntfy.cleanupDone({
-    removedBytes:   totalBytes,
-    filesCount:     totalFiles,
-    retentionHours: config.retentionHours,
-  });
-
-  return { removedBytes: totalBytes, filesCount: totalFiles };
+  return performCleanup('manual');
 }
 
-module.exports = { start, runCleanupNow };
+module.exports = { start, runCleanupNow, setCaptureControllers };
