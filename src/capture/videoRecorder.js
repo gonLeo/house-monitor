@@ -5,6 +5,18 @@ const path = require('path');
 const { spawn } = require('child_process');
 const config = require('../config');
 
+const IGNORED_PIPE_ERRORS = new Set(['EOF', 'EPIPE', 'ERR_STREAM_DESTROYED']);
+
+function attachPipeErrorHandler(stream) {
+  if (!stream || typeof stream.on !== 'function' || stream._houseMonitorPipeGuard) return;
+
+  stream._houseMonitorPipeGuard = true;
+  stream.on('error', (err) => {
+    if (!err || IGNORED_PIPE_ERRORS.has(err.code)) return;
+    console.warn('[VideoRecorder] stdin error:', err.message);
+  });
+}
+
 function pad(n) { return String(n).padStart(2, '0'); }
 
 function getDateString(d) {
@@ -81,17 +93,23 @@ class VideoSegmentRecorder {
   writeFrame(buffer) {
     if (!this.running) return;
 
-    if (!this._stdin || this._stdin.destroyed) {
+    if (!this._stdin || this._stdin.destroyed || this._stdin.writableEnded) {
       this._record();
-      if (!this._stdin || this._stdin.destroyed) return;
+      if (!this._stdin || this._stdin.destroyed || this._stdin.writableEnded) return;
     }
 
     if (this._segmentInfo) this._segmentInfo.framesWritten++;
 
     try {
-      this._stdin.write(buffer);
-    } catch {
-      // stdin may close mid-rotation; the next frame will reopen the segment
+      this._stdin.write(buffer, (err) => {
+        if (err && !IGNORED_PIPE_ERRORS.has(err.code)) {
+          console.warn('[VideoRecorder] Failed to write frame:', err.message);
+        }
+      });
+    } catch (err) {
+      if (!IGNORED_PIPE_ERRORS.has(err.code)) {
+        console.warn('[VideoRecorder] Failed to write frame:', err.message);
+      }
     }
   }
 
@@ -107,6 +125,7 @@ class VideoSegmentRecorder {
     this._segmentInfo = null;
 
     if (stdin && !stdin.destroyed) {
+      attachPipeErrorHandler(stdin);
       try { stdin.end(); } catch { /* ignore */ }
     }
   }
@@ -148,6 +167,8 @@ class VideoSegmentRecorder {
     this._process = proc;
     this._stdin = proc.stdin;
     this._segmentInfo = segmentInfo;
+
+    attachPipeErrorHandler(this._stdin);
 
     let stderr = '';
     proc.stderr.on('data', (d) => { stderr += d.toString(); });

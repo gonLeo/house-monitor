@@ -5,10 +5,12 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { EventEmitter } = require('events');
 
 const cleanup = require('../src/storage/cleanup');
 const config = require('../src/config');
 const db = require('../src/db/queries');
+const VideoSegmentRecorder = require('../src/capture/videoRecorder');
 
 function makeTempTree() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'house-monitor-cleanup-'));
@@ -85,4 +87,26 @@ test('cleanup pauses active capture and resumes it after deletion', async (t) =>
   assert.equal(fs.existsSync(path.join(temp.segmentsDir, '2026-04-19', 'clip.mp4')), false);
   assert.equal(fs.existsSync(path.join(temp.audioDir, '2026-04-19', 'clip.m4a')), false);
   assert.equal(fs.existsSync(path.join(temp.snapshotsDir, 'snap.jpg')), false);
+});
+
+test('video recorder stop ignores EOF from a closing ffmpeg pipe', async () => {
+  const recorder = new VideoSegmentRecorder();
+  const fakeStdin = new EventEmitter();
+  fakeStdin.destroyed = false;
+  fakeStdin.end = () => {
+    process.nextTick(() => {
+      const err = new Error('write EOF');
+      err.code = 'EOF';
+      fakeStdin.emit('error', err);
+    });
+  };
+
+  recorder.running = true;
+  recorder._stdin = fakeStdin;
+  recorder._process = { exitCode: 0, killed: false };
+
+  await recorder.stop();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(recorder.running, false);
 });

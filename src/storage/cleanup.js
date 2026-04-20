@@ -2,7 +2,6 @@
 
 const fs   = require('fs');
 const path = require('path');
-const cron = require('node-cron');
 const config = require('../config');
 const ntfy   = require('../notifications/ntfy');
 const db     = require('../db/queries');
@@ -12,6 +11,7 @@ let captureControllers = {
   audioRecorder: null,
 };
 let cleanupInFlight = null;
+let cleanupTimer = null;
 
 function setCaptureControllers({ videoRecorder = null, audioRecorder = null } = {}) {
   captureControllers = { videoRecorder, audioRecorder };
@@ -88,13 +88,27 @@ async function performCleanup(reason = 'manual') {
 }
 
 function start() {
-  // Run every retentionHours hours and wipe all media files + DB records
-  const cronExpr = `0 */${config.retentionHours} * * *`;
-  cron.schedule(cronExpr, async () => {
-    await performCleanup('scheduled');
-  });
+  const hours = Math.max(1, config.retentionHours);
+  const intervalMs = hours * 60 * 60 * 1000;
+
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+  }
+
+  cleanupTimer = setInterval(() => {
+    performCleanup('scheduled').catch((err) => {
+      console.error('[Cleanup] Scheduled cleanup failed:', err.message);
+    });
+  }, intervalMs);
+
+  if (typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref();
+  }
+
+  const nextRun = new Date(Date.now() + intervalMs);
   console.log(
-    `[Cleanup] Scheduled cleanup every ${config.retentionHours}h (${cronExpr}) — deletes all media files.`
+    `[Cleanup] Scheduled cleanup every ${hours}h from app start. ` +
+    `Next run around ${nextRun.toLocaleString()}.`
   );
 }
 
