@@ -16,9 +16,6 @@ const MIN_CONFIDENCE = 0.5;
 const alarm = require('../alarm');
 const ntfy  = require('../notifications/ntfy');
 
-let _frameCounter = 0;
-let _isDetecting  = false;
-
 function usesMotionMode(mode) {
   return mode === 'motion_only' || mode === 'motion_and_human';
 }
@@ -144,6 +141,10 @@ async function processHumanDetection({ buffer, detector, presenceTracker, db, st
  *   capture → stream → encode frame → detect → save snapshot → notify
  */
 function start({ camera, wsServer, detector, motionDetector, presenceTracker, motionTracker, videoRecorder, db, storage, settings }) {
+  // Local to this start() call so multiple invocations (tests, hot-reload) don't
+  // share state or interfere with each other's detection gate.
+  let _frameCounter = 0;
+  let _isDetecting  = false;
 
   camera.on('frame', async (buffer) => {
     _frameCounter++;

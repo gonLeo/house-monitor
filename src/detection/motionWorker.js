@@ -1,7 +1,10 @@
 'use strict';
 
 const { parentPort } = require('worker_threads');
-const Jimp = require('jimp');
+// jpeg-js is a lightweight synchronous JPEG decoder (transitive dep of jimp).
+// It decodes only JPEG, loads no extra codecs, and keeps pixel data in a
+// Buffer (external/native memory) rather than V8 heap — far cheaper than Jimp.
+const jpegjs = require('jpeg-js');
 
 const EMPTY_RESULT = Object.freeze({
   motion: false,
@@ -28,8 +31,7 @@ function toBuffer(value) {
   return Buffer.from(value || []);
 }
 
-function createGrayscaleSample(image, sampleWidth) {
-  const { width: sourceWidth, height: sourceHeight, data } = image.bitmap;
+function createGrayscaleSample(data, sourceWidth, sourceHeight, sampleWidth) {
   const width = Math.max(1, sampleWidth);
   const height = Math.max(1, Math.round((sourceHeight * width) / sourceWidth));
   const gray = new Uint8Array(width * height);
@@ -55,15 +57,17 @@ function createGrayscaleSample(image, sampleWidth) {
   return { width, height, gray };
 }
 
-async function analyze(buffer, options = {}) {
+function analyze(buffer, options = {}) {
   const sampleWidth = Math.round(clamp(Number(options.sampleWidth) || 160, 64, 320));
   const pixelDiffThreshold = clamp(Number(options.pixelDiffThreshold) || 28, 5, 80);
   const minChangedPixels = Math.round(clamp(Number(options.minChangedPixels) || 120, 10, 5000));
   const minChangedRatio = clamp(Number(options.minChangedRatio) || 0.015, 0.001, 0.5);
   const roi = options.roi || { x: 0, y: 0, w: 1, h: 1 };
 
-  const image = await Jimp.read(buffer);
-  const { width, height, gray } = createGrayscaleSample(image, sampleWidth);
+  // Synchronous decode: pixel data lives in a Buffer (external/native memory),
+  // so it does not pressure the V8 heap at all.
+  const { data, width: sourceWidth, height: sourceHeight } = jpegjs.decode(buffer, { maxMemoryUsageInMB: 512 });
+  const { width, height, gray } = createGrayscaleSample(data, sourceWidth, sourceHeight, sampleWidth);
 
   if (!previousGray || previousWidth !== width || previousHeight !== height) {
     previousGray = gray;
@@ -111,10 +115,10 @@ async function analyze(buffer, options = {}) {
   };
 }
 
-parentPort.on('message', async ({ id, buffer, options }) => {
+parentPort.on('message', ({ id, buffer, options }) => {
   try {
     const jpegBuffer = toBuffer(buffer);
-    const result = await analyze(jpegBuffer, options);
+    const result = analyze(jpegBuffer, options);
     parentPort.postMessage({ type: 'result', id, result });
   } catch (err) {
     console.warn('[MotionWorker] Failed to analyze frame:', err.message);

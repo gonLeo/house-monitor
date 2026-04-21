@@ -13,6 +13,7 @@ const ALARM_PATH = path.join(__dirname, 'public', 'alarm.mp3');
 const REPEATS    = 1;
 
 let _enabled = true;
+let _activeProc = null;
 
 function setEnabled(val) {
   _enabled = Boolean(val);
@@ -24,7 +25,10 @@ function isEnabled() {
 }
 
 function _playOnce(remaining) {
-  if (!_enabled || remaining <= 0) return;
+  if (!_enabled || remaining <= 0) {
+    _activeProc = null;
+    return;
+  }
 
   const proc = spawn(
     'ffplay',
@@ -32,14 +36,18 @@ function _playOnce(remaining) {
     { stdio: 'ignore', windowsHide: true }
   );
 
+  _activeProc = proc;
   proc.on('close', () => _playOnce(remaining - 1));
   proc.on('error', (err) => {
     console.warn('[Alarm] ffplay error:', err.message);
+    _activeProc = null;
   });
 }
 
 function play() {
-  if (!_enabled) return;
+  // Skip if already playing — prevents accumulating concurrent ffplay processes
+  // when detection events fire faster than the alarm duration.
+  if (!_enabled || _activeProc) return;
   _playOnce(REPEATS);
 }
 

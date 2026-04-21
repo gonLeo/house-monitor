@@ -122,8 +122,10 @@ async function main() {
   async function shutdown(signal) {
     console.log(`\n[App] ${signal} received. Shutting down…`);
     camera.stop();
-    videoRecorder.stop();
-    audioRecorder.stop();
+    // Await both recorders so ffmpeg has time to write the moov atom and finalise
+    // the current segment files before the process exits.
+    await Promise.allSettled([videoRecorder.stop(), audioRecorder.stop()]);
+    wsServer.close();
     connectivity.stop();
     httpServer.close(async () => {
       const { pool } = require('./db/connection');

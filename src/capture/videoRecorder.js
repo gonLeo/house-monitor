@@ -171,7 +171,11 @@ class VideoSegmentRecorder {
     attachPipeErrorHandler(this._stdin);
 
     let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      // Cap accumulated stderr to 4 KB to avoid unbounded string growth over
+      // long segments where ffmpeg emits a progress line every second.
+      if (stderr.length < 4096) stderr += d.toString();
+    });
 
     proc.on('error', (err) => {
       console.error('[VideoRecorder] ffmpeg spawn error:', err.message);

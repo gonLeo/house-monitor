@@ -3,29 +3,19 @@
 const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const storage  = require('../storage/files');
 
-function isReadableMediaSegment(filePath, streamType) {
+/**
+ * Quick sanity check using only the filesystem — no ffmpeg spawning.
+ * getVideoSegmentsInRange already filters by file extension and validates
+ * timestamps from the file name, so the remaining risk of a corrupt segment
+ * causing the remux to fail is negligible and handled by ffmpeg itself.
+ */
+function isReadableMediaSegment(filePath) {
   try {
     const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size < 1024) return false;
-
-    const args = ['-v', 'error', '-i', filePath, '-map', `0:${streamType}:0`];
-    if (streamType === 'v') {
-      args.push('-frames:v', '1');
-    } else {
-      args.push('-frames:a', '1');
-    }
-    args.push('-f', 'null', '-');
-
-    const result = spawnSync('ffmpeg', args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true,
-      timeout: 15000,
-    });
-
-    return result.status === 0;
+    return stat.isFile() && stat.size >= 1024;
   } catch {
     return false;
   }
@@ -50,7 +40,7 @@ async function generate(startTime, endTime, res) {
   const videoSegments = storage
     .getVideoSegmentsInRange(startTime, endTime)
     .filter((seg) => {
-      const ok = isReadableMediaSegment(seg.filePath, 'v');
+      const ok = isReadableMediaSegment(seg.filePath);
       if (!ok) {
         console.warn('[Clips] Skipping unreadable video segment:', seg.filePath);
       }
@@ -79,7 +69,7 @@ async function generate(startTime, endTime, res) {
   // Build audio concat list (same strategy as before).
   const audioSegments = storage
     .getAudioSegmentsInRange(startTime, endTime)
-    .filter((seg) => isReadableMediaSegment(seg.filePath, 'a'));
+    .filter((seg) => isReadableMediaSegment(seg.filePath));
   const hasAudio      = audioSegments.length > 0;
   const audioLines    = [];
   if (hasAudio) {

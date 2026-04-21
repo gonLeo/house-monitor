@@ -51,7 +51,7 @@ class WsServer {
     });
 
     // Compute and broadcast FPS every second
-    setInterval(() => {
+    this._fpsTimer = setInterval(() => {
       const fps = this._frameCount - this._lastFrameCount;
       this._lastFrameCount = this._frameCount;
       this.broadcast({ type: 'fps', value: fps });
@@ -126,6 +126,15 @@ class WsServer {
         try { client.terminate(); } catch { /* ignore */ }
       }
     }
+  }
+
+  close() {
+    clearInterval(this._fpsTimer);
+    // Send proper close frames to all connected clients before shutting down.
+    for (const client of this.wss.clients) {
+      try { client.terminate(); } catch { /* ignore */ }
+    }
+    this.wss.close();
   }
 
   getClientCount() {

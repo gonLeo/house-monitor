@@ -45,9 +45,17 @@ function load() {
   if (readyPromise) return readyPromise;
 
   readyPromise = new Promise((resolve, reject) => {
-    worker = new Worker(path.join(__dirname, 'motionWorker.js'));
+    const thisWorker = new Worker(path.join(__dirname, 'motionWorker.js'), {
+      // Cap the worker heap so it crashes cleanly (triggering recycle) instead
+      // of exhausting system memory and taking down the main process with it.
+      resourceLimits: {
+        maxOldGenerationSizeMb: 96,
+        maxYoungGenerationSizeMb: 32,
+      },
+    });
+    worker = thisWorker;
 
-    worker.on('message', (msg) => {
+    thisWorker.on('message', (msg) => {
       if (msg.type === 'ready') {
         isReady = true;
         console.log('[MotionDetector] Worker ready.');
@@ -69,14 +77,19 @@ function load() {
       }
     });
 
-    worker.on('error', (err) => {
+    thisWorker.on('error', (err) => {
       console.error('[MotionDetector] Worker error:', err.message);
       if (!isReady) reject(err);
     });
 
-    worker.on('exit', (code) => {
+    thisWorker.on('exit', (code) => {
       if (code !== 0) console.error(`[MotionDetector] Worker exited with code ${code}`);
-      resetWorkerState();
+      // Guard: only reset if this worker is still the active one.
+      // A recycled worker exits *after* a new worker may already be assigned,
+      // so without this check resetWorkerState() would null out the new worker.
+      if (worker === thisWorker) {
+        resetWorkerState();
+      }
     });
   });
 
@@ -90,6 +103,9 @@ async function detect(jpegBuffer, options = {}) {
     } catch {
       return EMPTY_RESULT;
     }
+    // Re-check after await: the old worker's exit event may have fired during
+    // the yield and called resetWorkerState(), nulling the newly created worker.
+    if (!worker) return EMPTY_RESULT;
   }
 
   return new Promise((resolve) => {

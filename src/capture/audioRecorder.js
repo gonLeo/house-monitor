@@ -105,7 +105,9 @@ class AudioRecorder {
     ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
     let stderr = '';
-    this._process.stderr.on('data', (d) => { stderr += d.toString(); });
+    this._process.stderr.on('data', (d) => {
+      if (stderr.length < 4096) stderr += d.toString();
+    });
 
     this._process.on('error', (err) => {
       console.error('[Audio] ffmpeg spawn error:', err.message);

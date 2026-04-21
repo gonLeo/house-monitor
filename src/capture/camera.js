@@ -7,6 +7,9 @@ const config           = require('../config');
 const JPEG_SOI = Buffer.from([0xFF, 0xD8]);
 const JPEG_EOI = Buffer.from([0xFF, 0xD9]);
 const MAX_RECONNECT_DELAY_MS = 30000;
+// Guard against corrupted/stalled streams that produce SOI but never EOI.
+// At 1280×720 MJPEG, a single frame is ~50–100 KB; 4 MB = ~40–80 frames.
+const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 
 /**
  * Captures JPEG frames from a DirectShow webcam via ffmpeg.
@@ -96,6 +99,15 @@ class CameraCapture extends EventEmitter {
 
   _parseChunk(chunk) {
     this._buffer = Buffer.concat([this._buffer, chunk]);
+
+    // Safety: if the buffer grows beyond the cap without a complete frame it
+    // means the device is producing a corrupted stream. Reset and wait for a
+    // fresh SOI from the next keyframe rather than running out of memory.
+    if (this._buffer.length > MAX_BUFFER_BYTES) {
+      console.warn('[Camera] Frame buffer overflow — discarding and resetting.');
+      this._buffer = Buffer.alloc(0);
+      return;
+    }
 
     // Extract all complete JPEG frames from the buffer
     while (true) {
