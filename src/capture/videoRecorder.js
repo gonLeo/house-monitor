@@ -153,6 +153,9 @@ class VideoSegmentRecorder {
       '-framerate', String(config.segmentFps), // hint only; actual PTS from wallclock
       '-i',         'pipe:0',
       '-c:v',       'libx264',
+      // Cap encoder threads — libx264 defaults to all logical cores which starves
+      // other processes (detection workers, WS broadcast) on low-core machines.
+      '-threads',   '2',
       '-crf',       '23',
       '-preset',    'fast',
       '-pix_fmt',   'yuv420p',

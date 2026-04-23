@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Local resilient video surveillance system with offline-first storage",
   "main": "src/index.js",
-  "scripts": {    "postinstall": "node -e \"const f=require('fs'),p=require('path');const s=p.join('node_modules','@tensorflow','tfjs-node','deps','lib','tensorflow.dll');const d=p.join('node_modules','@tensorflow','tfjs-node','lib','napi-v8','tensorflow.dll');if(f.existsSync(s)&&!f.existsSync(d)){f.copyFileSync(s,d);console.log('[postinstall] tensorflow.dll copiado')}\"",    "start": "node src/index.js",
+  "scripts": {
+    "postinstall": "node -e \"const f=require('fs'),p=require('path');const s=p.join('node_modules','@tensorflow','tfjs-node','deps','lib','tensorflow.dll');const d=p.join('node_modules','@tensorflow','tfjs-node','lib','napi-v8','tensorflow.dll');if(f.existsSync(s)&&!f.existsSync(d)){f.copyFileSync(s,d);console.log('[postinstall] tensorflow.dll copiado')}\"",
+    "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
   "engines": {
@@ -17,6 +19,7 @@
     "jimp": "^0.22.12",
     "node-cron": "^3.0.3",
     "pg": "^8.11.5",
+    "sharp": "^0.34.5",
     "ws": "^8.17.0"
   }
 }

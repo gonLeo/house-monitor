@@ -1,10 +1,11 @@
 'use strict';
 
 const { parentPort } = require('worker_threads');
-// jpeg-js is a lightweight synchronous JPEG decoder (transitive dep of jimp).
-// It decodes only JPEG, loads no extra codecs, and keeps pixel data in a
-// Buffer (external/native memory) rather than V8 heap — far cheaper than Jimp.
-const jpegjs = require('jpeg-js');
+// sharp (libvips) replaces jpeg-js for JPEG decode + resize + greyscale.
+// It uses a native C streaming pipeline that processes images tile-by-tile,
+// so peak memory is a fraction of decoding the full frame first (jpeg-js approach).
+// Pixel data is returned as a raw Buffer in external/native memory, same as before.
+const sharp = require('sharp');
 
 const EMPTY_RESULT = Object.freeze({
   motion: false,
@@ -31,43 +32,26 @@ function toBuffer(value) {
   return Buffer.from(value || []);
 }
 
-function createGrayscaleSample(data, sourceWidth, sourceHeight, sampleWidth) {
-  const width = Math.max(1, sampleWidth);
-  const height = Math.max(1, Math.round((sourceHeight * width) / sourceWidth));
-  const gray = new Uint8Array(width * height);
-
-  const xScale = sourceWidth / width;
-  const yScale = sourceHeight / height;
-
-  let offset = 0;
-  for (let y = 0; y < height; y++) {
-    const sourceY = Math.min(sourceHeight - 1, Math.floor((y + 0.5) * yScale));
-    const rowOffset = sourceY * sourceWidth * 4;
-
-    for (let x = 0; x < width; x++) {
-      const sourceX = Math.min(sourceWidth - 1, Math.floor((x + 0.5) * xScale));
-      const idx = rowOffset + (sourceX * 4);
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-      gray[offset++] = (r * 77 + g * 150 + b * 29) >> 8;
-    }
-  }
-
-  return { width, height, gray };
-}
-
-function analyze(buffer, options = {}) {
+async function analyze(buffer, options = {}) {
   const sampleWidth = Math.round(clamp(Number(options.sampleWidth) || 160, 64, 320));
   const pixelDiffThreshold = clamp(Number(options.pixelDiffThreshold) || 28, 5, 80);
   const minChangedPixels = Math.round(clamp(Number(options.minChangedPixels) || 120, 10, 5000));
   const minChangedRatio = clamp(Number(options.minChangedRatio) || 0.015, 0.001, 0.5);
   const roi = options.roi || { x: 0, y: 0, w: 1, h: 1 };
 
-  // Synchronous decode: pixel data lives in a Buffer (external/native memory),
-  // so it does not pressure the V8 heap at all.
-  const { data, width: sourceWidth, height: sourceHeight } = jpegjs.decode(buffer, { maxMemoryUsageInMB: 512 });
-  const { width, height, gray } = createGrayscaleSample(data, sourceWidth, sourceHeight, sampleWidth);
+  // sharp pipeline: decode JPEG → resize to sampleWidth (aspect-preserving) →
+  // convert to single-channel greyscale → raw pixel Buffer.
+  // All in a single native C pass; far lower peak memory than jpegjs which fully
+  // decodes the MJPEG frame (e.g. 1280×720 = ~3.5 MB RGBA) before any resize.
+  const { data, info } = await sharp(buffer)
+    .resize(sampleWidth, null, { fit: 'inside', kernel: 'nearest' })
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const width  = info.width;
+  const height = info.height;
+  const gray   = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
 
   if (!previousGray || previousWidth !== width || previousHeight !== height) {
     previousGray = gray;
@@ -115,10 +99,10 @@ function analyze(buffer, options = {}) {
   };
 }
 
-parentPort.on('message', ({ id, buffer, options }) => {
+parentPort.on('message', async ({ id, buffer, options }) => {
   try {
     const jpegBuffer = toBuffer(buffer);
-    const result = analyze(jpegBuffer, options);
+    const result = await analyze(jpegBuffer, options);
     parentPort.postMessage({ type: 'result', id, result });
   } catch (err) {
     console.warn('[MotionWorker] Failed to analyze frame:', err.message);

@@ -64,8 +64,10 @@ async function performCleanup(reason = 'manual') {
         cleanAllAudio(),
         cleanAllSnapshots(),
       ]);
+      await cleanAllDbRecords();
       await cleanAllLogs();
       const totalFiles = seg.files + audio.files + snaps.files;
+      const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
       const label = reason === 'scheduled' ? 'Scheduled' : 'Manual';
 
       console.log(`[Cleanup] ${label} cleanup triggered: ${totalFiles} file(s) removed.`);

@@ -49,10 +49,18 @@ class CameraCapture extends EventEmitter {
     const { device, width, height, fps } = config.camera;
 
     const args = [
+      // Limit DirectShow internal ring buffer (default is unbounded on Windows).
+      // 64 MB is ample for 30fps MJPEG 1280×720 (~50–100 KB/frame = ~150 frames).
+      '-rtbufsize',  '64M',
+      // Skip probing — we know it's MJPEG; reduces startup latency and buffering.
+      '-probesize',  '32',
+      '-analyzeduration', '0',
       '-f',          'dshow',
       '-vcodec',     'mjpeg',           // tell dshow to use camera's native MJPEG stream
       '-video_size', `${width}x${height}`,
       '-framerate',  String(fps),
+      // Limit the demuxer thread queue to avoid unbounded frame buffering.
+      '-thread_queue_size', '8',
       '-i',          `video=${device}`,
       '-f',          'image2pipe',
       '-vcodec',     'copy',            // pass MJPEG frames through without re-encoding

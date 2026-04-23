@@ -28,11 +28,12 @@ async function notifyNewDetection({ event, confidence, wsServer }) {
   wsServer.broadcast({
     type: 'detection',
     event: {
-      id:         event.id,
-      timestamp:  event.timestamp,
-      ended_at:   event.ended_at || null,
-      type:       event.type,
+      id:            event.id,
+      timestamp:     event.timestamp,
+      ended_at:      event.ended_at || null,
+      type:          event.type,
       confidence,
+      snapshot_path: event.snapshot_path || null,
     },
   });
 }

@@ -62,8 +62,8 @@ test('cleanup pauses active capture and resumes it after deletion', async (t) =>
     start() { calls.push('audio-start'); this.running = true; },
   };
 
-  db.deleteAllEvents = async () => 0;
-  db.deleteAllConnectivityLogs = async () => 0;
+  db.deleteAllEvents = async () => { calls.push('db-deleteEvents'); return 5; };
+  db.deleteAllConnectivityLogs = async () => { calls.push('db-deleteConnLogs'); return 3; };
 
   cleanup.setCaptureControllers({ videoRecorder, audioRecorder });
 
@@ -83,7 +83,7 @@ test('cleanup pauses active capture and resumes it after deletion', async (t) =>
   const result = await cleanup.runCleanupNow();
 
   assert.equal(result.filesCount, 3);
-  assert.deepEqual(calls, ['video-stop', 'audio-stop', 'video-start', 'audio-start']);
+  assert.deepEqual(calls, ['video-stop', 'audio-stop', 'db-deleteEvents', 'db-deleteConnLogs', 'video-start', 'audio-start']);
   assert.equal(fs.existsSync(path.join(temp.segmentsDir, '2026-04-19', 'clip.mp4')), false);
   assert.equal(fs.existsSync(path.join(temp.audioDir, '2026-04-19', 'clip.m4a')), false);
   assert.equal(fs.existsSync(path.join(temp.snapshotsDir, 'snap.jpg')), false);

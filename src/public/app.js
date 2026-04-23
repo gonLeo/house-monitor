@@ -498,6 +498,10 @@ function buildEventCard(ev) {
     ? `<button class="btn-clip" onclick="openClipViewer('${ev.timestamp}', '${ev.ended_at}', '${ev.type || ''}')">▶ Ver Clipe</button>`
     : `<button class="btn-clip" disabled title="Disponível quando a gravação do ciclo terminar">⏳ Processando…</button>`;
 
+  const snapshotBtn = ev.snapshot_path
+    ? `<button class="btn-clip btn-snapshot" onclick="openSnapshotViewer('${ev.id}')">🖼 Ver Snapshot</button>`
+    : '';
+
   item.innerHTML = `
     ${thumbHtml}
     <div class="event-info">
@@ -506,6 +510,7 @@ function buildEventCard(ev) {
       ${confHtml}
       ${durHtml}
       ${clipBtn}
+      ${snapshotBtn}
     </div>`;
   return item;
 }
@@ -650,6 +655,27 @@ function closeClipViewer() {
   document.getElementById('clip-modal-loading').innerHTML = '<div class="spinner"></div><br>Gerando clipe…';
   document.getElementById('clip-modal-video').style.display   = 'none';
   document.getElementById('clip-modal-download').style.display = 'none';
+}
+
+// ── Snapshot viewer ───────────────────────────────────────────
+function openSnapshotViewer(eventId) {
+  const overlay  = document.getElementById('snapshot-modal-overlay');
+  const img      = document.getElementById('snapshot-modal-img');
+  const title    = document.getElementById('snapshot-modal-title');
+  const download = document.getElementById('snapshot-modal-download');
+
+  const url = withAccessToken(`/snapshots/event-${eventId}.jpg`);
+  title.textContent = `Snapshot — evento #${eventId}`;
+  img.src = url;
+  download.href     = url;
+  download.download = `snapshot-event-${eventId}.jpg`;
+  overlay.classList.add('open');
+}
+
+function closeSnapshotViewer() {
+  const img = document.getElementById('snapshot-modal-img');
+  img.src = '';
+  document.getElementById('snapshot-modal-overlay').classList.remove('open');
 }
 
 // ── Clip link generator ───────────────────────────────────────

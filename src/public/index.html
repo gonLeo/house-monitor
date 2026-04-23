@@ -197,6 +197,20 @@
     </div>
   </div>
 
+  <!-- Snapshot viewer modal -->
+  <div class="clip-modal-overlay" id="snapshot-modal-overlay" onclick="if(event.target===this)closeSnapshotViewer()">
+    <div class="snapshot-modal">
+      <div class="clip-modal-header">
+        <h3 id="snapshot-modal-title">Snapshot do evento</h3>
+        <div class="modal-actions">
+          <a id="snapshot-modal-download" class="btn-secondary" style="padding:7px 14px;font-size:12px;font-weight:600;border-radius:6px;text-decoration:none" download>⬇ Baixar</a>
+          <button class="btn-secondary" onclick="closeSnapshotViewer()">✕ Fechar</button>
+        </div>
+      </div>
+      <img id="snapshot-modal-img" alt="snapshot" />
+    </div>
+  </div>
+
   <!-- Clip viewer modal -->
   <div class="clip-modal-overlay" id="clip-modal-overlay" onclick="if(event.target===this)closeClipViewer()">
     <div class="clip-modal">
