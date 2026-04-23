@@ -59,7 +59,7 @@ async function processMotionDetection({ buffer, motionResult, motionTracker, db,
     );
 
     alarm.play();
-    ntfy.motionDetected({ activityRatio: motionResult.score || 0 });
+    ntfy.motionDetected({ activityRatio: motionResult.score || 0, snapshotBuffer: buffer });
 
     await notifyNewDetection({
       wsServer,
@@ -108,7 +108,7 @@ async function processHumanDetection({ buffer, detector, presenceTracker, db, st
       );
 
       alarm.play();
-      ntfy.personDetected({ confidence: person.score });
+      ntfy.personDetected({ confidence: person.score, snapshotBuffer: buffer });
 
       await notifyNewDetection({
         wsServer,

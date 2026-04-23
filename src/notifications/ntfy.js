@@ -89,15 +89,54 @@ class NtfyNotifier {
     req.end();
   }
 
+  /**
+   * Low-level fire-and-forget PUT to ntfy.sh with a JPEG image attachment.
+   * The text message is passed via the `Message` header; the body is the raw image buffer.
+   * Errors are logged as warnings and never propagated.
+   */
+  _sendWithAttachment({ title, priority = 'default', tags = [], body, buffer, filename = 'snapshot.jpg' }) {
+    if (!this.enabled) return;
+
+    const options = {
+      hostname: 'ntfy.sh',
+      port:     443,
+      path:     `/${this.topic}`,
+      method:   'PUT',
+      headers:  {
+        'Title':          title,
+        'Priority':       priority,
+        'Tags':           tags.join(','),
+        'Message':        body,
+        'Filename':       filename,
+        'Content-Type':   'image/jpeg',
+        'Content-Length': buffer.length,
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      if (res.statusCode !== 200) {
+        console.warn(`[Ntfy] Notification with attachment failed: HTTP ${res.statusCode} — "${title}"`);
+      }
+      res.resume(); // drain response to free socket
+    });
+
+    req.on('error', (err) => {
+      console.warn('[Ntfy] Failed to send notification with attachment:', err.message);
+    });
+
+    req.write(buffer);
+    req.end();
+  }
+
   // ─── Notification methods ─────────────────────────────────────────────────
 
   /**
    * Fired every time a person is confirmed detected by the pipeline.
-   * @param {{ confidence: number }} opts
+   * @param {{ confidence: number, snapshotBuffer?: Buffer }} opts
    */
-  personDetected({ confidence }) {
-    const now = new Date();
-    this._send({
+  personDetected({ confidence, snapshotBuffer }) {
+    const now  = new Date();
+    const opts = {
       title:    'PRESENCA DETECTADA', // title não pode ter acento
       priority: 'high',
       tags:     ['police_car_light', 'house'],
@@ -106,16 +145,22 @@ class NtfyNotifier {
         `⏰ Horário: ${formatDateTime(now)}\n` +
         `🎯 Confiança: ${(confidence * 100).toFixed(1)}%\n\n` +
         `⚠️ Verifique o sistema de monitoramento.`,
-    });
+    };
+
+    if (snapshotBuffer) {
+      this._sendWithAttachment({ ...opts, buffer: snapshotBuffer });
+    } else {
+      this._send(opts);
+    }
   }
 
   /**
    * Fired when the lightweight motion detector sees relevant movement.
-   * @param {{ activityRatio: number }} opts
+   * @param {{ activityRatio: number, snapshotBuffer?: Buffer }} opts
    */
-  motionDetected({ activityRatio }) {
-    const now = new Date();
-    this._send({
+  motionDetected({ activityRatio, snapshotBuffer }) {
+    const now  = new Date();
+    const opts = {
       title:    'MOVIMENTO DETECTADO',
       priority: 'default',
       tags:     ['eyes', 'camera_with_flash'],
@@ -124,7 +169,13 @@ class NtfyNotifier {
         `⏰ Horário: ${formatDateTime(now)}\n` +
         `📈 Atividade na área monitorada: ${(activityRatio * 100).toFixed(2)}%\n\n` +
         `📹 Um clipe desse ciclo ficará disponível em breve.`,
-    });
+    };
+
+    if (snapshotBuffer) {
+      this._sendWithAttachment({ ...opts, buffer: snapshotBuffer });
+    } else {
+      this._send(opts);
+    }
   }
 
   /**
