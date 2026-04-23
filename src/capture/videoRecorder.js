@@ -5,6 +5,18 @@ const path = require('path');
 const { spawn } = require('child_process');
 const config = require('../config');
 
+const IGNORED_PIPE_ERRORS = new Set(['EOF', 'EPIPE', 'ERR_STREAM_DESTROYED']);
+
+function attachPipeErrorHandler(stream) {
+  if (!stream || typeof stream.on !== 'function' || stream._houseMonitorPipeGuard) return;
+
+  stream._houseMonitorPipeGuard = true;
+  stream.on('error', (err) => {
+    if (!err || IGNORED_PIPE_ERRORS.has(err.code)) return;
+    console.warn('[VideoRecorder] stdin error:', err.message);
+  });
+}
+
 function pad(n) { return String(n).padStart(2, '0'); }
 
 function getDateString(d) {
@@ -26,15 +38,17 @@ function getSegmentName(d) {
  */
 class VideoSegmentRecorder {
   constructor() {
-    this.running       = false;
-    this._process      = null;
-    this._stdin        = null;
-    this._rotateTimer  = null;
+    this.running      = false;
+    this._process     = null;
+    this._stdin       = null;
+    this._rotateTimer = null;
+    this._segmentInfo = null;
   }
 
   start() {
+    if (this.running) return;
+
     this.running = true;
-    this._record();
     console.log(
       `[VideoRecorder] Recording started: segment=${config.segmentDurationSeconds}s` +
       ` dir="${config.segmentsDir}"`
@@ -42,41 +56,89 @@ class VideoSegmentRecorder {
   }
 
   stop() {
+    const proc = this._process;
+
     this.running = false;
     clearTimeout(this._rotateTimer);
     this._endCurrentSegment();
+
+    if (!proc || proc.exitCode !== null || proc.killed) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      proc.once('close', finish);
+      proc.once('error', finish);
+      setTimeout(() => {
+        try {
+          if (proc.exitCode === null && !proc.killed) proc.kill('SIGTERM');
+        } catch { /* ignore */ }
+        finish();
+      }, 3000);
+    });
   }
 
   /**
    * Write a single MJPEG frame buffer into the current segment's stdin pipe.
-   * Silently ignored during rotation gaps.
+   * The ffmpeg segment is spawned lazily on the first real frame so empty/invalid
+   * MP4s are not created during camera startup gaps or reconnects.
    */
   writeFrame(buffer) {
-    if (!this._stdin || this._stdin.destroyed) return;
+    if (!this.running) return;
+
+    if (!this._stdin || this._stdin.destroyed || this._stdin.writableEnded) {
+      this._record();
+      if (!this._stdin || this._stdin.destroyed || this._stdin.writableEnded) return;
+    }
+
+    if (this._segmentInfo) this._segmentInfo.framesWritten++;
+
     try {
-      this._stdin.write(buffer);
-    } catch {
-      // stdin may close mid-rotation; next frame goes to the new process
+      this._stdin.write(buffer, (err) => {
+        if (err && !IGNORED_PIPE_ERRORS.has(err.code)) {
+          console.warn('[VideoRecorder] Failed to write frame:', err.message);
+        }
+      });
+    } catch (err) {
+      if (!IGNORED_PIPE_ERRORS.has(err.code)) {
+        console.warn('[VideoRecorder] Failed to write frame:', err.message);
+      }
     }
   }
 
   // ─── private ────────────────────────────────────────────────────────────────
 
   _endCurrentSegment() {
-    if (this._stdin && !this._stdin.destroyed) {
-      try { this._stdin.end(); } catch { /* ignore */ }
-    }
-    this._stdin   = null;
+    clearTimeout(this._rotateTimer);
+    this._rotateTimer = null;
+
+    const stdin = this._stdin;
+    this._stdin = null;
     this._process = null;
+    this._segmentInfo = null;
+
+    if (stdin && !stdin.destroyed) {
+      attachPipeErrorHandler(stdin);
+      try { stdin.end(); } catch { /* ignore */ }
+    }
   }
 
   _record() {
     if (!this.running) return;
+    if (this._stdin && !this._stdin.destroyed) return;
 
     const now     = new Date();
     const dateDir = path.join(config.segmentsDir, getDateString(now));
     fs.mkdirSync(dateDir, { recursive: true });
     const outPath = path.join(dateDir, `${getSegmentName(now)}.mp4`);
+    const segmentInfo = { outPath, framesWritten: 0 };
 
     // Input: raw MJPEG frames piped one-by-one; each is a complete JPEG buffer.
     // -use_wallclock_as_timestamps replaces ffmpeg's frame-count-based PTS with the
@@ -91,21 +153,32 @@ class VideoSegmentRecorder {
       '-framerate', String(config.segmentFps), // hint only; actual PTS from wallclock
       '-i',         'pipe:0',
       '-c:v',       'libx264',
+      // Cap encoder threads — libx264 defaults to all logical cores which starves
+      // other processes (detection workers, WS broadcast) on low-core machines.
+      '-threads',   '2',
       '-crf',       '23',
       '-preset',    'fast',
       '-pix_fmt',   'yuv420p',
       '-r',         String(config.segmentFps),
-      '-g',         '30',          // keyframe every 2s at 15fps; limits seek inaccuracy to ≤2s
+      '-g',         '15',          // keyframe every 1s at 15fps; smoother clip starts/seeks
+      '-keyint_min','15',
       '-tune',      'film',        // optimise for natural motion content
       '-movflags',  '+faststart',  // moov at front → seekable during concat
       '-y',         outPath,
     ], { stdio: ['pipe', 'ignore', 'pipe'] });
 
     this._process = proc;
-    this._stdin   = proc.stdin;
+    this._stdin = proc.stdin;
+    this._segmentInfo = segmentInfo;
+
+    attachPipeErrorHandler(this._stdin);
 
     let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      // Cap accumulated stderr to 4 KB to avoid unbounded string growth over
+      // long segments where ffmpeg emits a progress line every second.
+      if (stderr.length < 4096) stderr += d.toString();
+    });
 
     proc.on('error', (err) => {
       console.error('[VideoRecorder] ffmpeg spawn error:', err.message);
@@ -113,22 +186,36 @@ class VideoSegmentRecorder {
     });
 
     proc.on('close', (code) => {
+      const hadFrames = segmentInfo.framesWritten > 0;
+
+      if (fs.existsSync(outPath)) {
+        try {
+          const stat = fs.statSync(outPath);
+          if (!hadFrames || stat.size === 0) {
+            fs.unlinkSync(outPath);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (!hadFrames) {
+        console.log(`[VideoRecorder] Empty segment skipped: ${outPath}`);
+        return;
+      }
+
       if (!this.running) return;
       if (code !== 0 && code !== null) {
         console.warn(`[VideoRecorder] Segment closed with code ${code}.`);
         if (stderr) console.debug('[VideoRecorder] stderr:', stderr.slice(-400));
-        // Retry after a short delay so we don't tight-loop on persistent errors
-        setTimeout(() => this._record(), 3000);
+        setTimeout(() => this._record(), 1000);
       } else {
         console.log(`[VideoRecorder] Segment saved: ${outPath}`);
       }
     });
 
     // Rotate: close stdin after the configured duration so ffmpeg flushes and
-    // finalises the file, then immediately start the next segment.
+    // finalises the file. The next real frame will open the following segment.
     this._rotateTimer = setTimeout(() => {
       this._endCurrentSegment();
-      this._record();
     }, config.segmentDurationSeconds * 1000);
   }
 }

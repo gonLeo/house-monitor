@@ -7,6 +7,9 @@ const config           = require('../config');
 const JPEG_SOI = Buffer.from([0xFF, 0xD8]);
 const JPEG_EOI = Buffer.from([0xFF, 0xD9]);
 const MAX_RECONNECT_DELAY_MS = 30000;
+// Guard against corrupted/stalled streams that produce SOI but never EOI.
+// At 1280×720 MJPEG, a single frame is ~50–100 KB; 4 MB = ~40–80 frames.
+const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
 
 /**
  * Captures JPEG frames from a DirectShow webcam via ffmpeg.
@@ -46,10 +49,18 @@ class CameraCapture extends EventEmitter {
     const { device, width, height, fps } = config.camera;
 
     const args = [
+      // Limit DirectShow internal ring buffer (default is unbounded on Windows).
+      // 64 MB is ample for 30fps MJPEG 1280×720 (~50–100 KB/frame = ~150 frames).
+      '-rtbufsize',  '64M',
+      // Skip probing — we know it's MJPEG; reduces startup latency and buffering.
+      '-probesize',  '32',
+      '-analyzeduration', '0',
       '-f',          'dshow',
       '-vcodec',     'mjpeg',           // tell dshow to use camera's native MJPEG stream
       '-video_size', `${width}x${height}`,
       '-framerate',  String(fps),
+      // Limit the demuxer thread queue to avoid unbounded frame buffering.
+      '-thread_queue_size', '8',
       '-i',          `video=${device}`,
       '-f',          'image2pipe',
       '-vcodec',     'copy',            // pass MJPEG frames through without re-encoding
@@ -96,6 +107,15 @@ class CameraCapture extends EventEmitter {
 
   _parseChunk(chunk) {
     this._buffer = Buffer.concat([this._buffer, chunk]);
+
+    // Safety: if the buffer grows beyond the cap without a complete frame it
+    // means the device is producing a corrupted stream. Reset and wait for a
+    // fresh SOI from the next keyframe rather than running out of memory.
+    if (this._buffer.length > MAX_BUFFER_BYTES) {
+      console.warn('[Camera] Frame buffer overflow — discarding and resetting.');
+      this._buffer = Buffer.alloc(0);
+      return;
+    }
 
     // Extract all complete JPEG frames from the buffer
     while (true) {

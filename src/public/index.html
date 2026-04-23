@@ -8,6 +8,18 @@
 </head>
 <body>
 
+  <div id="auth-overlay" class="auth-overlay open">
+    <div class="auth-card">
+      <h2>🔐 Acesso protegido</h2>
+      <p>Informe o token para liberar o painel de monitoramento.</p>
+      <form id="auth-form" class="auth-form">
+        <input id="access-token-input" type="password" placeholder="Token de acesso" autocomplete="current-password" />
+        <button type="submit" class="btn-primary">Entrar</button>
+      </form>
+      <div id="auth-error" class="auth-error"></div>
+    </div>
+  </div>
+
   <!-- Header -->
   <header>
     <h1>House Monitor</h1>
@@ -28,7 +40,10 @@
         <div id="stream-wrapper">
           <img id="stream-img" alt="stream" />
           <div id="stream-placeholder">Aguardando câmera…</div>
-          <div id="detection-flash">🚨 Pessoa detectada!</div>
+          <div id="detection-flash">🚨 Detecção registrada!</div>
+          <div id="roi-overlay" aria-hidden="true">
+            <div id="roi-box"></div>
+          </div>
         </div>
       </div>
 
@@ -74,6 +89,20 @@
                 <span class="slider"></span>
               </div>
             </label>
+
+            <div class="ops-divider"></div>
+
+            <label class="mode-control" title="Escolher estratégia de detecção">
+              <span>🎛️ Modo</span>
+              <select id="detection-mode">
+                <option value="motion_only">Movimento</option>
+                <option value="motion_and_human">Movimento + Humano</option>
+                <option value="human_only">Somente Humano</option>
+              </select>
+            </label>
+
+            <button class="btn-secondary btn-roi" id="roi-edit-btn" onclick="toggleRoiEdit()">🎯 Definir área</button>
+            <button class="btn-secondary btn-roi" id="roi-clear-btn" onclick="clearRoi()">↺ Área total</button>
 
             <div class="ops-divider"></div>
 
@@ -135,6 +164,15 @@
               <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Até</label>
               <input type="datetime-local" id="filter-end" />
             </div>
+            <div>
+              <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Tipo</label>
+              <select id="filter-type">
+                <option value="">Todos</option>
+                <option value="motion_detected">Movimento</option>
+                <option value="person_detected">Humano</option>
+                <option value="connection_restored">Conectividade</option>
+              </select>
+            </div>
           </div>
           <div class="btn-row">
             <button class="btn-primary" onclick="loadEvents()">Filtrar</button>
@@ -156,6 +194,20 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Snapshot viewer modal -->
+  <div class="clip-modal-overlay" id="snapshot-modal-overlay" onclick="if(event.target===this)closeSnapshotViewer()">
+    <div class="snapshot-modal">
+      <div class="clip-modal-header">
+        <h3 id="snapshot-modal-title">Snapshot do evento</h3>
+        <div class="modal-actions">
+          <a id="snapshot-modal-download" class="btn-secondary" style="padding:7px 14px;font-size:12px;font-weight:600;border-radius:6px;text-decoration:none" download>⬇ Baixar</a>
+          <button class="btn-secondary" onclick="closeSnapshotViewer()">✕ Fechar</button>
+        </div>
+      </div>
+      <img id="snapshot-modal-img" alt="snapshot" />
     </div>
   </div>
 

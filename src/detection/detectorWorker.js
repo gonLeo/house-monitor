@@ -6,9 +6,17 @@
 const { parentPort } = require('worker_threads');
 const tf      = require('@tensorflow/tfjs-node'); // native C++ backend — ~10x faster than pure-JS
 const cocoSsd = require('@tensorflow-models/coco-ssd');
-const Jimp    = require('jimp');
 
 let model = null;
+
+function toBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  return Buffer.from(value || []);
+}
 
 async function init() {
   // tfjs-node registers its own backend automatically — no setBackend needed.
@@ -31,25 +39,26 @@ parentPort.on('message', async ({ id, buffer }) => {
   }
 
   let predictions = [];
+  let inputTensor = null;
+
   try {
-    const image = await Jimp.read(Buffer.from(buffer));
-    // Resize to 300px wide (model's native input size) — 4× fewer pixels,
-    // dramatically faster pixel loop and TF.js tensor creation.
-    image.resize(300, Jimp.AUTO);
-    const { data, width, height } = image.bitmap;
+    const jpegBuffer = toBuffer(buffer);
+    inputTensor = tf.tidy(() => {
+      const decoded = tf.node.decodeImage(jpegBuffer, 3);
+      const [height, width] = decoded.shape;
+      const targetWidth = 300;
+      const targetHeight = Math.max(1, Math.round((height * targetWidth) / width));
 
-    const rgbData = new Uint8Array(width * height * 3);
-    for (let i = 0; i < width * height; i++) {
-      rgbData[i * 3]     = data[i * 4];
-      rgbData[i * 3 + 1] = data[i * 4 + 1];
-      rgbData[i * 3 + 2] = data[i * 4 + 2];
-    }
+      return tf.image
+        .resizeBilinear(decoded, [targetHeight, targetWidth], true)
+        .cast('int32');
+    });
 
-    const tensor = tf.tensor3d(rgbData, [height, width, 3], 'int32');
-    predictions = await model.detect(tensor);
-    tensor.dispose();
+    predictions = await model.detect(inputTensor);
   } catch {
     // ignore bad frames
+  } finally {
+    if (inputTensor) inputTensor.dispose();
   }
 
   parentPort.postMessage({ type: 'result', id, predictions });

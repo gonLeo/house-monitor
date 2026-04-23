@@ -2,54 +2,139 @@
 
 const fs   = require('fs');
 const path = require('path');
-const cron = require('node-cron');
 const config = require('../config');
 const ntfy   = require('../notifications/ntfy');
 const db     = require('../db/queries');
 
+let captureControllers = {
+  videoRecorder: null,
+  audioRecorder: null,
+};
+let cleanupInFlight = null;
+let cleanupTimer = null;
+
+function setCaptureControllers({ videoRecorder = null, audioRecorder = null } = {}) {
+  captureControllers = { videoRecorder, audioRecorder };
+}
+
+async function pauseActiveCaptures() {
+  const paused = [];
+
+  for (const [label, recorder] of [
+    ['video', captureControllers.videoRecorder],
+    ['audio', captureControllers.audioRecorder],
+  ]) {
+    if (!recorder || !recorder.running || typeof recorder.stop !== 'function') continue;
+
+    console.log(`[Cleanup] Pausing ${label} capture before deletion…`);
+    try {
+      await recorder.stop();
+      paused.push({ label, recorder });
+    } catch (err) {
+      console.warn(`[Cleanup] Failed to pause ${label} capture:`, err.message);
+    }
+  }
+
+  return paused;
+}
+
+function resumeCaptures(paused) {
+  for (const { label, recorder } of paused) {
+    if (!recorder || typeof recorder.start !== 'function') continue;
+    try {
+      recorder.start();
+      console.log(`[Cleanup] Resumed ${label} capture after cleanup.`);
+    } catch (err) {
+      console.warn(`[Cleanup] Failed to resume ${label} capture:`, err.message);
+    }
+  }
+}
+
+async function performCleanup(reason = 'manual') {
+  if (cleanupInFlight) {
+    console.log('[Cleanup] Cleanup already in progress; reusing the current run.');
+    return cleanupInFlight;
+  }
+
+  cleanupInFlight = (async () => {
+    const paused = await pauseActiveCaptures();
+    try {
+      const [seg, audio, snaps] = await Promise.all([
+        cleanAllSegments(),
+        cleanAllAudio(),
+        cleanAllSnapshots(),
+      ]);
+      await cleanAllDbRecords();
+      await cleanAllLogs();
+      const totalFiles = seg.files + audio.files + snaps.files;
+      const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
+      const label = reason === 'scheduled' ? 'Scheduled' : 'Manual';
+
+      console.log(`[Cleanup] ${label} cleanup triggered: ${totalFiles} file(s) removed.`);
+
+      ntfy.cleanupDone({
+        removedBytes:   totalBytes,
+        filesCount:     totalFiles,
+        retentionHours: config.retentionHours,
+      });
+
+      return { removedBytes: totalBytes, filesCount: totalFiles };
+    } finally {
+      resumeCaptures(paused);
+      cleanupInFlight = null;
+    }
+  })();
+
+  return cleanupInFlight;
+}
+
 function start() {
-  // Run every retentionHours hours and wipe all media files + DB records
-  const cronExpr = `0 */${config.retentionHours} * * *`;
-  cron.schedule(cronExpr, async () => {
-    const seg   = cleanAllSegments();
-    const audio = cleanAllAudio();
-    const snaps = cleanAllSnapshots();
-    cleanAllLogs();
-    await cleanAllDbRecords();
+  const hours = Math.max(1, config.retentionHours);
+  const intervalMs = hours * 60 * 60 * 1000;
 
-    const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
-    const totalFiles = seg.files + audio.files + snaps.files;
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+  }
 
-    ntfy.cleanupDone({
-      removedBytes:   totalBytes,
-      filesCount:     totalFiles,
-      retentionHours: config.retentionHours,
+  cleanupTimer = setInterval(() => {
+    performCleanup('scheduled').catch((err) => {
+      console.error('[Cleanup] Scheduled cleanup failed:', err.message);
     });
-  });
+  }, intervalMs);
+
+  if (typeof cleanupTimer.unref === 'function') {
+    cleanupTimer.unref();
+  }
+
+  const nextRun = new Date(Date.now() + intervalMs);
   console.log(
-    `[Cleanup] Scheduled cleanup every ${config.retentionHours}h (${cronExpr}) — deletes all media files.`
+    `[Cleanup] Scheduled cleanup every ${hours}h from app start. ` +
+    `Next run around ${nextRun.toLocaleString()}.`
   );
 }
 
-function cleanAllSegments() {
+async function cleanAllSegments() {
   const segDir = config.segmentsDir;
   if (!fs.existsSync(segDir)) return { bytes: 0, files: 0 };
 
   let deletedCount = 0;
   let deletedBytes = 0;
 
-  for (const dateDir of fs.readdirSync(segDir)) {
+  for (const dateDir of await fs.promises.readdir(segDir)) {
     const dirPath = path.join(segDir, dateDir);
-    if (!fs.statSync(dirPath).isDirectory()) continue;
-    for (const file of fs.readdirSync(dirPath)) {
+    let dirStat;
+    try { dirStat = await fs.promises.stat(dirPath); } catch { continue; }
+    if (!dirStat.isDirectory()) continue;
+    for (const file of await fs.promises.readdir(dirPath)) {
       const filePath = path.join(dirPath, file);
       try {
-        deletedBytes += fs.statSync(filePath).size;
-        fs.unlinkSync(filePath);
+        const stat = await fs.promises.stat(filePath);
+        deletedBytes += stat.size;
+        await fs.promises.unlink(filePath);
         deletedCount++;
       } catch { /* ignore */ }
     }
-    try { fs.rmdirSync(dirPath); } catch { /* ignore */ }
+    try { await fs.promises.rmdir(dirPath); } catch { /* ignore */ }
   }
 
   if (deletedCount > 0) {
@@ -58,19 +143,20 @@ function cleanAllSegments() {
   return { bytes: deletedBytes, files: deletedCount };
 }
 
-function cleanAllSnapshots() {
+async function cleanAllSnapshots() {
   const snapDir = config.snapshotsDir;
   if (!snapDir || !fs.existsSync(snapDir)) return { bytes: 0, files: 0 };
 
   let deletedCount = 0;
   let deletedBytes = 0;
 
-  for (const file of fs.readdirSync(snapDir)) {
+  for (const file of await fs.promises.readdir(snapDir)) {
     const filePath = path.join(snapDir, file);
     try {
-      if (!fs.statSync(filePath).isFile()) continue;
-      deletedBytes += fs.statSync(filePath).size;
-      fs.unlinkSync(filePath);
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) continue;
+      deletedBytes += stat.size;
+      await fs.promises.unlink(filePath);
       deletedCount++;
     } catch { /* ignore */ }
   }
@@ -81,25 +167,28 @@ function cleanAllSnapshots() {
   return { bytes: deletedBytes, files: deletedCount };
 }
 
-function cleanAllAudio() {
+async function cleanAllAudio() {
   const audioDir = config.audioDir;
   if (!audioDir || !fs.existsSync(audioDir)) return { bytes: 0, files: 0 };
 
   let deletedCount = 0;
   let deletedBytes = 0;
 
-  for (const dateDir of fs.readdirSync(audioDir)) {
+  for (const dateDir of await fs.promises.readdir(audioDir)) {
     const dirPath = path.join(audioDir, dateDir);
-    if (!fs.statSync(dirPath).isDirectory()) continue;
-    for (const file of fs.readdirSync(dirPath)) {
+    let dirStat;
+    try { dirStat = await fs.promises.stat(dirPath); } catch { continue; }
+    if (!dirStat.isDirectory()) continue;
+    for (const file of await fs.promises.readdir(dirPath)) {
       const filePath = path.join(dirPath, file);
       try {
-        deletedBytes += fs.statSync(filePath).size;
-        fs.unlinkSync(filePath);
+        const stat = await fs.promises.stat(filePath);
+        deletedBytes += stat.size;
+        await fs.promises.unlink(filePath);
         deletedCount++;
       } catch { /* ignore */ }
     }
-    try { fs.rmdirSync(dirPath); } catch { /* ignore */ }
+    try { await fs.promises.rmdir(dirPath); } catch { /* ignore */ }
   }
 
   if (deletedCount > 0) {
@@ -118,7 +207,7 @@ async function cleanAllDbRecords() {
   }
 }
 
-function cleanAllLogs() {
+async function cleanAllLogs() {
   const logsDir = config.logsDir;
   if (!logsDir) return;
   const filePath = path.join(logsDir, 'app.log');
@@ -130,24 +219,7 @@ function cleanAllLogs() {
 }
 
 async function runCleanupNow() {
-  const seg   = cleanAllSegments();
-  const audio = cleanAllAudio();
-  const snaps = cleanAllSnapshots();
-  cleanAllLogs();
-  await cleanAllDbRecords();
-
-  const totalBytes = seg.bytes + audio.bytes + snaps.bytes;
-  const totalFiles = seg.files + audio.files + snaps.files;
-
-  console.log(`[Cleanup] Manual cleanup triggered: ${totalFiles} file(s) removed.`);
-
-  ntfy.cleanupDone({
-    removedBytes:   totalBytes,
-    filesCount:     totalFiles,
-    retentionHours: config.retentionHours,
-  });
-
-  return { removedBytes: totalBytes, filesCount: totalFiles };
+  return performCleanup('manual');
 }
 
-module.exports = { start, runCleanupNow };
+module.exports = { start, runCleanupNow, setCaptureControllers };

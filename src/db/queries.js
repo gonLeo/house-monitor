@@ -114,6 +114,34 @@ async function deleteAllConnectivityLogs() {
   return result.rowCount;
 }
 
+async function getPreference(key) {
+  const result = await pool.query(
+    'SELECT value FROM preferences WHERE key = $1 LIMIT 1',
+    [key]
+  );
+  return result.rows[0]?.value ?? null;
+}
+
+async function setPreference(key, value) {
+  const result = await pool.query(
+    `INSERT INTO preferences (key, value, updated_at)
+     VALUES ($1, $2::jsonb, NOW())
+     ON CONFLICT (key)
+     DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+     RETURNING value, updated_at`,
+    [key, JSON.stringify(value)]
+  );
+  return result.rows[0] || null;
+}
+
+async function getAllPreferences() {
+  const result = await pool.query('SELECT key, value FROM preferences');
+  return result.rows.reduce((acc, row) => {
+    acc[row.key] = row.value;
+    return acc;
+  }, {});
+}
+
 module.exports = {
   insertEvent,
   updateEventSnapshot,
@@ -128,4 +156,7 @@ module.exports = {
   countAllEvents,
   deleteAllEvents,
   deleteAllConnectivityLogs,
+  getPreference,
+  setPreference,
+  getAllPreferences,
 };

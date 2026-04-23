@@ -8,6 +8,8 @@ const alarm   = require('../alarm');
 const ntfy    = require('../notifications/ntfy');
 const cleanup = require('../storage/cleanup');
 const db      = require('../db/queries');
+const settingsStore = require('../settings/runtime');
+const detector = require('../detection/detector');
 
 // ── Storage usage cache ───────────────────────────────────────────────────────
 const STORAGE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -72,6 +74,13 @@ function startStorageCacheRefresh() {
 }
 
 function setup(app, db, connectivity, camera) {
+
+  // ------------------------------------------------------------------
+  // POST /api/auth/validate — confirms the provided token is valid
+  // ------------------------------------------------------------------
+  app.post('/api/auth/validate', (req, res) => {
+    res.json({ ok: true });
+  });
 
   // ------------------------------------------------------------------
   // GET /events?startTime=&endTime=&synced=&type=
@@ -146,6 +155,26 @@ function setup(app, db, connectivity, camera) {
   });
 
   // ------------------------------------------------------------------
+  // GET /api/settings — current persisted runtime settings
+  // POST /api/settings — patch and persist settings
+  // ------------------------------------------------------------------
+  app.get('/api/settings', (req, res) => {
+    res.json(settingsStore.get());
+  });
+
+  app.post('/api/settings', async (req, res) => {
+    try {
+      const updated = await settingsStore.update(db, req.body ?? {});
+      alarm.setEnabled(updated.alarmEnabled);
+      ntfy.setEnabled(updated.notificationsEnabled);
+      res.json(updated);
+    } catch (err) {
+      console.error('[API] POST /api/settings:', err.message);
+      res.status(500).json({ error: 'Failed to persist settings' });
+    }
+  });
+
+  // ------------------------------------------------------------------
   // GET /api/alarm  — returns alarm enabled state
   // POST /api/alarm  — sets alarm enabled state { enabled: true/false }
   // ------------------------------------------------------------------
@@ -153,13 +182,19 @@ function setup(app, db, connectivity, camera) {
     res.json({ enabled: alarm.isEnabled() });
   });
 
-  app.post('/api/alarm', (req, res) => {
+  app.post('/api/alarm', async (req, res) => {
     const { enabled } = req.body ?? {};
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Body must be { "enabled": true|false }' });
     }
-    alarm.setEnabled(enabled);
-    res.json({ enabled: alarm.isEnabled() });
+    try {
+      const updated = await settingsStore.update(db, { alarmEnabled: enabled });
+      alarm.setEnabled(updated.alarmEnabled);
+      res.json({ enabled: updated.alarmEnabled });
+    } catch (err) {
+      console.error('[API] POST /api/alarm:', err.message);
+      res.status(500).json({ error: 'Failed to persist alarm preference' });
+    }
   });
 
   // ------------------------------------------------------------------
@@ -170,13 +205,63 @@ function setup(app, db, connectivity, camera) {
     res.json({ enabled: ntfy.isEnabled() });
   });
 
-  app.post('/api/notifications', (req, res) => {
+  app.post('/api/notifications', async (req, res) => {
     const { enabled } = req.body ?? {};
     if (typeof enabled !== 'boolean') {
       return res.status(400).json({ error: 'Body must be { "enabled": true|false }' });
     }
-    ntfy.setEnabled(enabled);
-    res.json({ enabled: ntfy.isEnabled() });
+    try {
+      const updated = await settingsStore.update(db, { notificationsEnabled: enabled });
+      ntfy.setEnabled(updated.notificationsEnabled);
+      res.json({ enabled: updated.notificationsEnabled });
+    } catch (err) {
+      console.error('[API] POST /api/notifications:', err.message);
+      res.status(500).json({ error: 'Failed to persist notifications preference' });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // GET /api/detection-mode  — returns current detection mode
+  // POST /api/detection-mode — sets mode { mode: motion_only|motion_and_human|human_only }
+  // ------------------------------------------------------------------
+  app.get('/api/detection-mode', (req, res) => {
+    res.json({ mode: settingsStore.get().detectionMode });
+  });
+
+  app.post('/api/detection-mode', async (req, res) => {
+    const { mode } = req.body ?? {};
+    if (!['motion_only', 'motion_and_human', 'human_only'].includes(mode)) {
+      return res.status(400).json({ error: 'Invalid mode' });
+    }
+    try {
+      const updated = await settingsStore.update(db, { detectionMode: mode });
+      if (updated.detectionMode !== 'motion_only') {
+        detector.load().catch((err) => {
+          console.warn('[API] Background human detector load failed:', err.message);
+        });
+      }
+      res.json({ mode: updated.detectionMode });
+    } catch (err) {
+      console.error('[API] POST /api/detection-mode:', err.message);
+      res.status(500).json({ error: 'Failed to persist detection mode' });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // POST /api/motion-roi — persists the motion monitoring rectangle
+  // ------------------------------------------------------------------
+  app.post('/api/motion-roi', async (req, res) => {
+    const { roi } = req.body ?? {};
+    if (!roi || typeof roi !== 'object') {
+      return res.status(400).json({ error: 'Body must be { roi: { x, y, w, h } }' });
+    }
+    try {
+      const updated = await settingsStore.update(db, { motion: { roi } });
+      res.json({ roi: updated.motion.roi });
+    } catch (err) {
+      console.error('[API] POST /api/motion-roi:', err.message);
+      res.status(500).json({ error: 'Failed to persist motion ROI' });
+    }
   });
 
   // ------------------------------------------------------------------

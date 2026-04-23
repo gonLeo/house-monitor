@@ -6,13 +6,28 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 
-let worker   = null;
-let isReady  = false;
+let worker = null;
+let isReady = false;
 let idCounter = 0;
+let loadPromise = null;
 const pending = new Map(); // id → resolve function
 
+function resetWorkerState() {
+  isReady = false;
+  loadPromise = null;
+  worker = null;
+
+  for (const resolvePending of pending.values()) {
+    resolvePending([]);
+  }
+  pending.clear();
+}
+
 function load() {
-  return new Promise((resolve, reject) => {
+  if (isReady) return Promise.resolve();
+  if (loadPromise) return loadPromise;
+
+  loadPromise = new Promise((resolve, reject) => {
     worker = new Worker(path.join(__dirname, 'detectorWorker.js'));
 
     worker.on('message', (msg) => {
@@ -36,8 +51,15 @@ function load() {
 
     worker.on('exit', (code) => {
       if (code !== 0) console.error(`[Detector] Worker exited with code ${code}`);
+      resetWorkerState();
     });
   });
+
+  return loadPromise;
+}
+
+function isLoaded() {
+  return isReady;
 }
 
 /**
@@ -52,10 +74,16 @@ function detect(jpegBuffer) {
   return new Promise((resolve) => {
     const id = ++idCounter;
     pending.set(id, resolve);
-    // postMessage with structured clone — buffer is copied so the original
-    // remains usable in the main thread (e.g. for saveSnapshot)
-    worker.postMessage({ id, buffer: jpegBuffer });
+
+    try {
+      const payload = Uint8Array.from(jpegBuffer);
+      worker.postMessage({ id, buffer: payload }, [payload.buffer]);
+    } catch (err) {
+      pending.delete(id);
+      console.error('[Detector] Failed to send frame to worker:', err.message);
+      resolve([]);
+    }
   });
 }
 
-module.exports = { load, detect };
+module.exports = { load, detect, isLoaded };
