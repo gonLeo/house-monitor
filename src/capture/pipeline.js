@@ -38,18 +38,23 @@ async function notifyNewDetection({ event, confidence, wsServer }) {
   });
 }
 
-async function processMotionDetection({ buffer, motionResult, motionTracker, db, storage, wsServer }) {
+// Phase 1: update tracker state machine — no DB/alarm/ntfy side-effects.
+function applyMotionTracker({ motionResult, motionTracker }) {
   const motionScore = parseFloat((motionResult.score || 0).toFixed(4));
-  const result = motionTracker.motionDetected(motionScore);
+  const trackerResult = motionTracker.motionDetected(motionScore);
+  return { trackerResult, motionScore };
+}
 
-  if (result.action === 'new_event') {
+// Phase 2: commit a tracker result to DB/alarm/ntfy/ws.
+async function commitMotionEvent({ buffer, trackerResult, motionScore, motionTracker, db, storage, wsServer }) {
+  if (trackerResult.action === 'new_event') {
     const event = await db.insertEvent({
       type: 'motion_detected',
       confidence: motionScore,
     });
 
     motionTracker.activate(event.id);
-    await db.updateEventEndedAt(event.id, result.endedAt);
+    await db.updateEventEndedAt(event.id, trackerResult.endedAt);
 
     const snapshotPath = await storage.saveSnapshot(buffer, event.id);
     await db.updateEventSnapshot(event.id, snapshotPath);
@@ -59,7 +64,7 @@ async function processMotionDetection({ buffer, motionResult, motionTracker, db,
     );
 
     alarm.play();
-    ntfy.motionDetected({ activityRatio: motionResult.score || 0, snapshotBuffer: buffer });
+    ntfy.motionDetected({ activityRatio: motionScore, snapshotBuffer: buffer });
 
     await notifyNewDetection({
       wsServer,
@@ -67,15 +72,20 @@ async function processMotionDetection({ buffer, motionResult, motionTracker, db,
       event: {
         ...event,
         snapshot_path: snapshotPath,
-        ended_at: result.endedAt,
+        ended_at: trackerResult.endedAt,
       },
     });
-  } else if (result.action === 'extend' && result.eventId) {
-    db.updateEventEndedAt(result.eventId, result.endedAt).catch((err) => {
+  } else if (trackerResult.action === 'extend' && trackerResult.eventId) {
+    db.updateEventEndedAt(trackerResult.eventId, trackerResult.endedAt).catch((err) => {
       console.warn('[Pipeline] Failed to extend motion window:', err.message);
     });
   }
+}
 
+// Convenience wrapper used by motion_only mode.
+async function processMotionDetection({ buffer, motionResult, motionTracker, db, storage, wsServer }) {
+  const { trackerResult, motionScore } = applyMotionTracker({ motionResult, motionTracker });
+  await commitMotionEvent({ buffer, trackerResult, motionScore, motionTracker, db, storage, wsServer });
   return Boolean(motionResult.motion);
 }
 
@@ -179,14 +189,37 @@ function start({ camera, wsServer, detector, motionDetector, presenceTracker, mo
       if (usesMotionMode(mode)) {
         const motionResult = await motionDetector.detect(buffer, liveSettings.motion);
         if (motionResult.motion) {
-          motionTriggered = await processMotionDetection({
-            buffer,
-            motionResult,
-            motionTracker,
-            db,
-            storage,
-            wsServer,
-          });
+          if (mode === 'motion_and_human') {
+            // Defer DB commit: run human detection first so that when a person
+            // is present we create only the person_detected event, not both.
+            const { trackerResult, motionScore } = applyMotionTracker({ motionResult, motionTracker });
+            motionTriggered = true;
+
+            const personFound = await processHumanDetection({
+              buffer,
+              detector,
+              presenceTracker,
+              db,
+              storage,
+              wsServer,
+            });
+
+            if (!personFound) {
+              // Pure motion (no human) — commit the motion event now.
+              await commitMotionEvent({ buffer, trackerResult, motionScore, motionTracker, db, storage, wsServer });
+            }
+            // personFound → person_detected event already committed; suppress motion event.
+          } else {
+            // motion_only: commit immediately.
+            motionTriggered = await processMotionDetection({
+              buffer,
+              motionResult,
+              motionTracker,
+              db,
+              storage,
+              wsServer,
+            });
+          }
         } else {
           const closing = motionTracker.motionAbsent();
           if (closing) {
@@ -204,7 +237,8 @@ function start({ camera, wsServer, detector, motionDetector, presenceTracker, mo
         }
       }
 
-      const shouldRunHuman = usesHumanMode(mode)
+      // motion_and_human already ran human detection inside the motion block above.
+      const shouldRunHuman = usesHumanMode(mode) && mode !== 'motion_and_human'
         && (mode === 'human_only' || motionTriggered || presenceTracker.isActive());
 
       if (shouldRunHuman) {
@@ -217,11 +251,16 @@ function start({ camera, wsServer, detector, motionDetector, presenceTracker, mo
           wsServer,
         });
       } else {
-        const closing = presenceTracker.personAbsent();
-        if (closing) {
-          db.updateEventEndedAt(closing.eventId, closing.endedAt).catch((err) => {
-            console.warn('[Pipeline] Failed to finalize ended_at:', err.message);
-          });
+        // For motion_and_human when motion was detected, processHumanDetection already
+        // ran (and internally calls personAbsent if needed) — skip the outer call.
+        const needsPresenceAbsent = mode !== 'motion_and_human' || !motionTriggered;
+        if (needsPresenceAbsent) {
+          const closing = presenceTracker.personAbsent();
+          if (closing) {
+            db.updateEventEndedAt(closing.eventId, closing.endedAt).catch((err) => {
+              console.warn('[Pipeline] Failed to finalize ended_at:', err.message);
+            });
+          }
         }
       }
     } catch (err) {
